@@ -13,4 +13,6 @@ DerivedData/
 # Claude Code
 .claude/worktrees/
 .claude/settings.local.json
+# Agent skills are installed on each machine, not kept here
+.claude/skills/
 scratch/
