@@ -72,9 +72,34 @@ private let overlapLimit = 0.4
     }
 
     @Test(arguments: ["111111111", "101111111", "000111111", "010101010"])
-    func theToyComesToRest(_ name: String) throws {
+    func theToyComesToRestAndStaysThere(_ name: String) throws {
         let state = try #require(PuzzleState(name))
-        #expect(speed(of: simulate(state, seconds: 3)) < 2)
+        var toy = simulate(state, seconds: 6)
+        #expect(toy.isAtRest)
+        let resting = toy.pose
+        toy.advance(by: 1)
+        #expect(toy.pose == resting)
+    }
+
+    @Test func aRestingToyMovesAgainOnceWoken() throws {
+        var toy = simulate(.allOn, seconds: 4)
+        try #require(toy.isAtRest)
+        toy.wake()
+        #expect(!toy.isAtRest)
+        toy.advance(by: 1.0 / 60)
+        #expect(!toy.isAtRest)
+    }
+
+    /// Where the whole assembly hangs from a single ring, it keeps creeping at a few millimetres a second for
+    /// a long time, where real friction would lock it: the solver gives friction a little less than its due
+    /// under a heavy load. Known, and waiting for the review of the solver.
+    @Test(arguments: ["100000000", "000000001"])
+    func aHeavilyLoadedToyStillHoldsTogetherWhileItCreeps(_ name: String) throws {
+        let state = try #require(PuzzleState(name))
+        let toy = simulate(state, seconds: 8)
+        #expect(toy.deepestOverlap < overlapLimit)
+        #expect(toy.pose.ringsOnTheSword == state)
+        #expect(toy.fastestSpeed < 30)
     }
 
     @Test func theSameStartGivesTheSameMotion() {
@@ -83,12 +108,16 @@ private let overlapLimit = 0.4
         #expect(first == second)
     }
 
-    /// With every ring off, nothing joins the rings, rods and bar to the sword any more: the puzzle is solved
-    /// and the assembly comes away. Until the app gives it a hand or a table, it falls.
-    @Test func withEveryRingOffTheAssemblyComesAwayFromTheSword() {
+    /// With every ring off, nothing joins the rings, the rods and the bar to the sword any more. A hand holds
+    /// the bar where it is, and the rings and rods settle on it instead of falling away.
+    @Test func withEveryRingOffAHandHoldsTheBar() {
         let start = RestPoses.pose(for: .allOff)
-        let toy = simulate(.allOff, seconds: 0.5)
-        #expect(toy.pose.bar.position.y < start.bar.position.y - 50)
+        let toy = simulate(.allOff, seconds: 3)
+        let pose = toy.pose
+        #expect(simd_distance(pose.bar.position, start.bar.position) < 3)
+        let lowest = (pose.rings + pose.rods).map(\.position.y).min() ?? 0
+        #expect(lowest > start.bar.position.y - 30)
+        #expect(pose.ringsOnTheSword == .allOff)
         #expect(toy.deepestOverlap < overlapLimit)
     }
 

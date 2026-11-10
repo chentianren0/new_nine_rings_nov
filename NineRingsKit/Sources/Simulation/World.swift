@@ -39,7 +39,21 @@ struct World: Sendable {
         }
     }
 
+    /// A hand on a body: it steers the body toward a place and a way of facing, with limited strength.
+    struct Hold: Sendable {
+        var body: Int
+        var position: Vector
+        var orientation: simd_quatd
+        /// The hand aims to arrive within this many seconds, at no more than `topSpeed` millimetres a second.
+        var settleTime = 0.05
+        var topSpeed = 60.0
+        /// The most force and the most twist the hand gives.
+        var force: Double
+        var torque: Double
+    }
+
     var bodies: [Body] = []
+    var holds: [Hold] = []
     /// Every piece, in its body's frame, or in the world's frame when it is fixed.
     var parts: [Part] = []
     var sleeves: [Sleeve] = []
@@ -50,8 +64,9 @@ struct World: Sendable {
     /// Millimetres a second squared.
     var gravity = Vector(0, -9810, 0)
     var friction = 0.3
-    /// The share of a body's speed that the air takes each second.
-    var damping = 0.5
+    /// The share of a body's speed lost each second to everything the contacts do not model: the scrape and
+    /// rattle of wire on wire that stops a real ring swinging within a second or two.
+    var damping = 2.5
     /// Two surfaces closer than this are watched for contact.
     var margin = 0.1
     /// The farthest any point may travel in one small step: well under the thinnest wire's radius.
@@ -103,12 +118,28 @@ struct World: Sendable {
         parts.append(Part(piece: piece, body: nil))
     }
 
+    /// Stops every body where it is.
+    mutating func halt() {
+        for index in bodies.indices {
+            bodies[index].halt()
+        }
+    }
+
     /// Advances the world by `time`, in `steps` small steps.
     mutating func advance(by time: Double, steps: Int) {
         let step = time / Double(steps)
         for _ in 0..<steps {
             for index in bodies.indices {
-                bodies[index].advance(by: step, acceleration: gravity, damping: damping, reach: reachPerStep)
+                bodies[index].gainSpeed(over: step, acceleration: gravity, damping: damping)
+            }
+            for hold in holds {
+                bodies[hold.body].steer(
+                    toward: hold.position, facing: hold.orientation,
+                    over: step, settleTime: hold.settleTime, topSpeed: hold.topSpeed, force: hold.force, torque: hold.torque
+                )
+            }
+            for index in bodies.indices {
+                bodies[index].move(over: step, reach: reachPerStep)
             }
             findContacts()
             for _ in 0..<sweeps {

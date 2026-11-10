@@ -11,6 +11,13 @@ public struct ToySimulation: Sendable {
 
     private var world = World()
     private let rodCenterY: Double
+    /// The hand that holds the bar while no ring is on the sword.
+    private var barHold: World.Hold?
+    private var calmTime = 0.0
+
+    /// Whether every part has stayed still for a moment. A toy at rest stays as it is, and `advance` leaves it
+    /// alone, until `wake` is called.
+    public private(set) var isAtRest = false
 
     public init(pose: ToyPose) {
         let rod = RodBuild()
@@ -53,19 +60,65 @@ public struct ToySimulation: Sendable {
         )
     }
 
-    /// The fastest any part is moving, in millimetres a second, counting how fast its far end swings.
+    /// The speed of the fastest point of any part, in millimetres a second.
     public var fastestSpeed: Double {
-        world.bodies.map { simd_length($0.velocity) + simd_length($0.angularVelocity) * $0.extent }.max() ?? 0
+        world.bodies.map(\.fastestPointSpeed).max() ?? 0
     }
 
     /// The deepest any two parts have been left overlapping, in millimetres, since the simulation began.
     /// While it stays a small part of a wire's radius, nothing can have passed through anything.
     public var deepestOverlap: Double { world.deepestOverlap }
 
-    /// Moves the toy on by `time` seconds.
+    /// Moves the toy on by `time` seconds, unless it is at rest.
     public mutating func advance(by time: Double) {
+        guard !isAtRest else { return }
+        holdTheBarWhileNoRingIsOn()
         world.advance(by: time, steps: max(1, Int((time * Self.stepsPerSecond).rounded())))
+
+        calmTime = fastestSpeed < Self.restSpeed ? calmTime + time : 0
+        if calmTime >= Self.restTime {
+            isAtRest = true
+            world.halt()
+        }
     }
+
+    /// Lets a toy at rest move again. Whatever is about to disturb it calls this first.
+    public mutating func wake() {
+        isAtRest = false
+        calmTime = 0
+    }
+
+    /// A part slower than this, in millimetres a second, for this long, in seconds, counts as still. The slow
+    /// creep that the solver leaves in a loaded contact is slower, so a resting toy stops for good, as real
+    /// friction would hold it.
+    private static let restSpeed = 3.0
+    private static let restTime = 0.25
+
+    /// With every ring off, nothing joins the rings, the rods and the bar to the sword, and they would fall
+    /// away. A person would be holding them in the other hand: so a hand takes hold of the bar where it is,
+    /// and lets go when a ring is back on.
+    private mutating func holdTheBarWhileNoRingIsOn() {
+        let isFree = pose.ringsOnTheSword == .allOff
+        if isFree && barHold == nil {
+            let bar = world.bodies[Self.barBody]
+            barHold = World.Hold(
+                body: Self.barBody,
+                position: bar.position,
+                orientation: bar.orientation,
+                force: Self.holdingForce,
+                torque: Self.holdingTorque
+            )
+        } else if !isFree {
+            barHold = nil
+        }
+        world.holds = barHold.map { [$0] } ?? []
+    }
+
+    private static let barBody = 18
+    /// Enough to carry all the parts, which weigh about 55 grams together, three times over.
+    private static let holdingForce = 3 * 55 * 9810.0
+    /// Enough to hold that weight level from an end of the bar.
+    private static let holdingTorque = holdingForce * Dimensions.Bar.length / 2
 
     // MARK: Building the parts
 
@@ -94,7 +147,7 @@ public struct ToySimulation: Sendable {
             orientation: pose.orientation,
             mass: mass,
             inertia: Vector(0.5, 0.5, 1) * (mass * radius * radius),
-            extent: radius + wire
+            halfSize: Vector(radius + wire, radius + wire, wire)
         )
     }
 
@@ -106,7 +159,7 @@ public struct ToySimulation: Sendable {
         let mass: Double
         let inertia: Vector
         let centerY: Double
-        let extent: Double
+        let halfSize: Vector
         let shaft: Segment
         let pieces: [Piece]
 
@@ -138,7 +191,11 @@ public struct ToySimulation: Sendable {
             // touch at its eye whirl it. It is given more inertia there than it has: nobody sees how fast a
             // rod spins about itself, and the solver stays calm.
             self.inertia = Vector(across, max(along, Self.leastInertiaShare * across), eyeMass * (eyeSquare + eyeAway) + shaftAcross + beadAcross)
-            self.extent = max(-centerY + Rod.eyeRadius + wire, centerY - Rod.beadCenterY + Rod.beadRadius)
+            self.halfSize = Vector(
+                Rod.beadRadius,
+                max(-centerY + Rod.eyeRadius + wire, centerY - Rod.beadCenterY + Rod.beadRadius),
+                Rod.beadRadius
+            )
 
             let eye = Vector(0, -centerY, 0)
             let bead = Vector(0, Rod.beadCenterY - centerY, 0)
@@ -156,7 +213,7 @@ public struct ToySimulation: Sendable {
                 orientation: pose.orientation,
                 mass: mass,
                 inertia: inertia,
-                extent: extent
+                halfSize: halfSize
             )
         }
     }
@@ -189,7 +246,7 @@ public struct ToySimulation: Sendable {
             orientation: pose.orientation,
             mass: mass,
             inertia: Vector(width + thickness, length + width, length + thickness) * (mass / 12),
-            extent: Bar.length / 2
+            halfSize: Vector(Bar.length, Bar.thickness, Bar.width) / 2
         )
     }
 

@@ -17,7 +17,7 @@ private func addRing(to world: inout World, at position: Vector) -> Int {
         orientation: acrossTheRails,
         mass: mass,
         inertia: Vector(0.5, 0.5, 1) * mass * ringRadius * ringRadius,
-        extent: ringRadius + ringWire
+        halfSize: Vector(ringRadius + ringWire, ringRadius + ringWire, ringWire)
     )
     let wire = Piece(
         shape: .circle(Circle(center: .zero, axisU: Vector(1, 0, 0), axisV: Vector(0, 1, 0), radius: ringRadius)),
