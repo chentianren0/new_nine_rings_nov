@@ -42,6 +42,9 @@
           "product-name": "Puzzle",
           "build-phase": { "build-phase": "frameworks" },
         }, {
+          "product-name": "Simulation",
+          "build-phase": { "build-phase": "frameworks" },
+        }, {
           "product-name": "Toy",
           "build-phase": { "build-phase": "frameworks" },
         },

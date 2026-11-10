@@ -58,6 +58,7 @@ It writes one image per state and view, named `<state>-<view>-<appearance>.png`,
 
 - `-capture-views`: `side`, `top` and `tip` are the app's camera presets; `yaw:pitch` in degrees, as `25:18`, looks from any other direction.
 - `-capture-focus x,y,z,size`: frames a cube of `size` millimetres around a point in the sword's frame instead of the whole toy, for close checks.
+- `-capture-settle 2`: lets the simulation run for that many seconds from the stored pose before drawing, and adds `-settled` to the name.
 - `-capture-size 1600x1000`: the image size in pixels.
 - `-capture-appearance dark`: the dark background.
 
