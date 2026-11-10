@@ -18,14 +18,20 @@ Run the package's tests. They are built with optimization, because the simulatio
 swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing
 ```
 
-Open `NineRings.xcodeproj` in Xcode 27.2 or later and run the `NineRings` scheme on My Mac or on an iOS simulator.
+Open `NineRings.xcodeproj` in Xcode 27.2 or later and run the `NineRings` scheme on My Mac.
 
-To compile from the command line without signing:
+To compile from the command line without signing, for the Mac:
 
 ```bash
 xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
 ```
 
-For a simulator, name one, as in `-destination 'platform=iOS Simulator,name=iPhone Duo'`. The destination "Any iOS Simulator Device" does not link, because the package is built without an Intel slice.
+And for iPhone and iPad:
+
+```bash
+xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO
+```
+
+A simulator build has to name a simulator: the destination "Any iOS Simulator Device" does not link, because the package is built without an Intel slice.
 
 The app is built with pointer authentication. `NineRings.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings` makes Xcode build the package the same way.
