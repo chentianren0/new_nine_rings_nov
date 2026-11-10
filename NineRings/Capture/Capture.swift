@@ -22,6 +22,11 @@ import Toy
 /// hand moves each of those rings in turn, off the sword if it is on and back on if it is off, and waits
 /// for the toy to come to rest before the next. The toy is drawn every so many seconds from when the first
 /// hand began. Those images are named `<state>-moves-t<time>-<view>-<appearance>.png`.
+///
+/// `-capture-taps 1,1 -capture-every 0.5` does the same through the app's own model: the rings are tapped in
+/// turn as a person would tap them, each when the toy has come to rest after the last, and the pose the model
+/// gives is drawn. A hand moves a ring where it can, and the toy glides elsewhere, as in the app. Those
+/// images are named `<state>-taps-t<time>-<view>-<appearance>.png`.
 @MainActor
 enum Capture {
     struct Request {
@@ -30,8 +35,12 @@ enum Capture {
         var focus: (center: SIMD3<Float>, size: Float)?
         /// How long the simulation runs from the stored pose before the toy is drawn; nil to draw the stored pose.
         var settle: Double?
-        /// Rings for a hand to move in turn, and how many seconds pass between drawings of the toy.
-        var moves: (rings: [Int], every: Double)?
+        /// Rings for a hand in the simulation to move in turn.
+        var moves: [Int]?
+        /// Rings to tap in turn on the app's model.
+        var taps: [Int]?
+        /// How many seconds pass between drawings of a toy in motion.
+        var every: Double
         var directory: URL
         var size: CGSize
         var appearance: Backdrop.Appearance
@@ -43,41 +52,12 @@ enum Capture {
         do {
             try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
             let renderer = try await Renderer(size: request.size, appearance: request.appearance)
-            if let moves = request.moves, let state = request.states.first {
-                var toy = ToySimulation(pose: RestPoses.pose(for: state))
-                for _ in 0..<240 {
-                    toy.advance(by: 1.0 / 120)
-                }
-                var time = 0.0
-                var nextDrawing = 0.0
-                func draw() async throws {
-                    for view in request.views {
-                        let stamp = String(format: "%05.2f", time)
-                        let name = "\(state)-moves-t\(stamp)-\(view.name)-\(request.appearance.rawValue).png"
-                        let url = request.directory.appending(path: name)
-                        try await renderer.render(toy.pose, view: view, focus: request.focus, to: url)
-                        print("capture: wrote \(url.path)")
-                    }
-                }
-                for ring in moves.rings {
-                    guard toy.move(ring: ring) else {
-                        print("capture: a hand cannot move ring \(ring) while the toy reads \(toy.pose.ringsOnTheSword)")
-                        continue
-                    }
-                    // A move that has not come to rest in half a minute is cut short, so a jam still ends.
-                    var steps = 0
-                    while !toy.isAtRest && steps < 120 * 30 {
-                        if time >= nextDrawing - 1e-9 {
-                            try await draw()
-                            nextDrawing += moves.every
-                        }
-                        toy.advance(by: 1.0 / 120)
-                        time += 1.0 / 120
-                        steps += 1
-                    }
-                    print("capture: ring \(ring) moved, the toy reads \(toy.pose.ringsOnTheSword) at \(String(format: "%.2f", time)) s\(toy.isAtRest ? "" : ", not at rest")")
-                }
-                try await draw()
+            if let state = request.states.first, let rings = request.moves {
+                try await filmMoves(of: rings, from: state, renderer: renderer, request: request)
+                exit(0)
+            }
+            if let state = request.states.first, let rings = request.taps {
+                try await filmTaps(on: rings, from: state, renderer: renderer, request: request)
                 exit(0)
             }
             for state in request.states {
@@ -95,6 +75,62 @@ enum Capture {
             print("capture: failed: \(error)")
             exit(1)
         }
+    }
+
+    /// Has a hand in the simulation move each ring in turn, from `state` left to settle, and films the toy.
+    private static func filmMoves(of rings: [Int], from state: PuzzleState, renderer: Renderer, request: Request) async throws {
+        let step = 1.0 / 120
+        var toy = ToySimulation(pose: RestPoses.pose(for: state))
+        for _ in 0..<240 {
+            toy.advance(by: step)
+        }
+        var film = Film(name: "\(state)-moves", renderer: renderer, request: request)
+        for ring in rings {
+            guard toy.move(ring: ring) else {
+                print("capture: a hand cannot move ring \(ring) while the toy reads \(toy.pose.ringsOnTheSword)")
+                continue
+            }
+            // A move that has not come to rest in half a minute is cut short, so a jam still ends.
+            var steps = 0
+            while !toy.isAtRest && steps < 30 * 120 {
+                try await film.roll(toy.pose, by: step)
+                toy.advance(by: step)
+                steps += 1
+            }
+            print("capture: ring \(ring) moved, the toy reads \(toy.pose.ringsOnTheSword) at \(film.clock) s\(toy.isAtRest ? "" : ", not at rest")")
+        }
+        try await film.draw(toy.pose)
+    }
+
+    /// Taps each ring in turn as a person would, on the app's model in `state` left to settle, and films the
+    /// pose the model gives, frame by frame as the app's view would.
+    private static func filmTaps(on rings: [Int], from state: PuzzleState, renderer: Renderer, request: Request) async throws {
+        let frame = 1.0 / 60
+        let model = ToyModel(state: state)
+        for _ in 0..<(5 * 60) where !model.isStill {
+            model.advance(by: frame)
+        }
+        var film = Film(name: "\(state)-taps", renderer: renderer, request: request)
+        for ring in rings {
+            let before = model.state
+            model.tap(ring)
+            let how = model.handMove != nil ? "a hand moves it" : model.refusal != nil ? "the rule refuses" : "it glides"
+            print("capture: tapped ring \(ring) in \(before) at \(film.clock) s: \(how)")
+            var byHand = model.handMove != nil
+            // A move that has not come to rest in half a minute is cut short, so a jam still ends.
+            var frames = 0
+            while !model.isStill && frames < 30 * 60 {
+                try await film.roll(model.pose, by: frame)
+                model.advance(by: frame)
+                frames += 1
+                if byHand && model.handMove == nil {
+                    byHand = false
+                    print("capture: the move ended at \(film.clock) s, the model reads \(model.state), the toy \(model.pose.ringsOnTheSword)")
+                }
+            }
+            print("capture: the model reads \(model.state), the toy \(model.pose.ringsOnTheSword) at \(film.clock) s\(model.isStill ? "" : ", not still")")
+        }
+        try await film.draw(model.pose)
     }
 
     /// The stored pose of a state, or what the simulation makes of it in `seconds`.
@@ -124,8 +160,12 @@ enum Capture {
         let appearance = value("-capture-appearance").flatMap(Backdrop.Appearance.init(rawValue:)) ?? .light
         let settle = value("-capture-settle").flatMap { Double($0) }
         let every = value("-capture-every").flatMap { Double($0) } ?? 0.5
-        let moves = value("-capture-moves").map { (rings: $0.split(separator: ",").compactMap { Int($0) }, every: max(every, 0.05)) }
-        return Request(states: states, views: views, focus: focus, settle: settle, moves: moves, directory: directory, size: size, appearance: appearance)
+        let rings = { (text: String) in text.split(separator: ",").compactMap { Int($0) } }
+        return Request(
+            states: states, views: views, focus: focus, settle: settle,
+            moves: value("-capture-moves").map(rings), taps: value("-capture-taps").map(rings), every: max(every, 0.05),
+            directory: directory, size: size, appearance: appearance
+        )
     }
 
     /// Where a capture looks from.
@@ -142,6 +182,43 @@ enum Capture {
             let degrees = text.split(separator: ":").compactMap { Float($0) }
             guard degrees.count == 2 else { return nil }
             (name, yaw, pitch) = ("yaw\(Int(degrees[0]))-pitch\(Int(degrees[1]))", degrees[0] * .pi / 180, degrees[1] * .pi / 180)
+        }
+    }
+
+    /// Draws a toy in motion every so often, each image named by the time it was drawn.
+    private struct Film {
+        let name: String
+        let renderer: Renderer
+        let request: Request
+        private(set) var time = 0.0
+        private var nextDrawing = 0.0
+
+        init(name: String, renderer: Renderer, request: Request) {
+            self.name = name
+            self.renderer = renderer
+            self.request = request
+        }
+
+        /// The time, as it is written in names and printed.
+        var clock: String {
+            time.formatted(.number.precision(.integerAndFractionLength(integerLimits: 2..., fractionLimits: 2...2)).grouping(.never).locale(Locale(identifier: "en_US_POSIX")))
+        }
+
+        /// Draws `pose` if a drawing is due, then moves the clock on by `seconds`.
+        mutating func roll(_ pose: ToyPose, by seconds: Double) async throws {
+            if time >= nextDrawing - 1e-9 {
+                try await draw(pose)
+                nextDrawing += request.every
+            }
+            time += seconds
+        }
+
+        func draw(_ pose: ToyPose) async throws {
+            for view in request.views {
+                let url = request.directory.appending(path: "\(name)-t\(clock)-\(view.name)-\(request.appearance.rawValue).png")
+                try await renderer.render(pose, view: view, focus: request.focus, to: url)
+                print("capture: wrote \(url.path)")
+            }
         }
     }
 
