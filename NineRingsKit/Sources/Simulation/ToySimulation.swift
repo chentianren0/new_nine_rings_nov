@@ -6,9 +6,6 @@ import simd
 ///
 /// It starts from a pose, moves when it is advanced, and gives back the pose it has reached.
 public struct ToySimulation: Sendable {
-    /// How many small steps the simulation takes for each second it is advanced.
-    public static let stepsPerSecond = 1200.0
-
     private var world = World()
     private let rodCenterY: Double
     /// The hand that holds the bar while no ring is on the sword.
@@ -69,11 +66,22 @@ public struct ToySimulation: Sendable {
     /// While it stays a small part of a wire's radius, nothing can have passed through anything.
     public var deepestOverlap: Double { world.deepestOverlap }
 
+    /// How many steps the simulation would not take, because parts were being forced into one another. While
+    /// a hand pulls a part into a jam, the toy stands still instead of giving way.
+    public var refusedSteps: Int { world.refusedSteps }
+
+    /// Pulls on a ring with a steady force, given in grams' weight along each world axis, until it is changed.
+    /// This is for trying how the toy stands up to a hand.
+    mutating func pull(ring number: Int, by gramsWeight: SIMD3<Double>) {
+        wake()
+        world.pushes = [World.Push(body: number - 1, force: gramsWeight * 9810)]
+    }
+
     /// Moves the toy on by `time` seconds, unless it is at rest.
     public mutating func advance(by time: Double) {
         guard !isAtRest else { return }
         holdTheBarWhileNoRingIsOn()
-        world.advance(by: time, steps: max(1, Int((time * Self.stepsPerSecond).rounded())))
+        world.advance(by: time)
 
         calmTime = fastestSpeed < Self.restSpeed ? calmTime + time : 0
         if calmTime >= Self.restTime {

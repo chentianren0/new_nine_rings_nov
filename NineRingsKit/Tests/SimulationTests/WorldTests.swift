@@ -37,7 +37,7 @@ private func addRails(to world: inout World, slope: Double = 0) {
 
 private func run(_ world: inout World, seconds: Double) {
     for _ in 0..<Int((seconds * 60).rounded()) {
-        world.advance(by: 1.0 / 60, steps: 20)
+        world.advance(by: 1.0 / 60)
     }
 }
 
@@ -60,7 +60,7 @@ private func gap(between ring: Body, andRailAt side: Double) -> Double {
         var world = World()
         world.damping = 0
         let ring = addRing(to: &world, at: .zero)
-        world.advance(by: 0.02, steps: 24)
+        world.advance(by: 0.02)
         // Stepping adds each small step's speed before it moves, which lands a little past the exact fall.
         let exact = 0.5 * 9810 * 0.02 * 0.02
         #expect(world.bodies[ring].position.y < -exact)
@@ -91,7 +91,7 @@ private func gap(between ring: Body, andRailAt side: Double) -> Double {
         let ring = addRing(to: &world, at: Vector(0, -3, 0))
         var deepest = 0.0
         for _ in 0..<90 {
-            world.advance(by: 1.0 / 60, steps: 20)
+            world.advance(by: 1.0 / 60)
             for side in [-1.0, 1.0] {
                 deepest = min(deepest, gap(between: world.bodies[ring], andRailAt: side))
             }

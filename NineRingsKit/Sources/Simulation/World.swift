@@ -5,6 +5,16 @@ import simd
 /// Time moves in small steps. In each step every body first moves freely, then the places where pieces overlap
 /// are pushed apart, and the bodies' velocities are read back from where they ended up. Positions are corrected
 /// directly, which keeps contact between thin wires firm without stiff springs.
+///
+/// Nothing passes through anything, and that holds by how a step is built, not by how well the solver does:
+///
+/// - No point travels farther than `freeReach` on its own in a step; a step is shortened until that is so.
+/// - What the solver then does to a body moves none of its points farther than `correctionReach`.
+/// - A step that would end with two surfaces overlapping by more than `overlapLimit` is not taken at all.
+///
+/// So two surfaces start a step overlapping by no more than the limit, and come no more than twice the two
+/// reaches closer during it. While that sum stays under the thinnest pair of parts, the middles of two parts
+/// can never meet, let alone cross.
 struct World: Sendable {
     /// A piece and the body that carries it. A piece without a body is fixed in the world.
     struct Part: Sendable {
@@ -37,6 +47,18 @@ struct World: Sendable {
             let halfSheet = sheetThickness / 2
             return acos(shaftRadius / (holeRadius * holeRadius + halfSheet * halfSheet).squareRoot()) - atan(halfSheet / holeRadius)
         }
+
+        /// How far the shaft's middle line may be from the hole's middle, for a shaft whose direction makes
+        /// the cosine `upright` with the hole's. A leaning shaft cuts the sheet in a longer oval, so it has
+        /// less room.
+        ///
+        /// This leaves out the sheet's thickness, which would take away up to 0.3 mm more and leave no room at
+        /// all at the steepest lean. That is on purpose: with no room there, the hole and the limit on leaning
+        /// pull against each other, and a toy hanging with all its rods at that limit never settles. The shaft
+        /// stays well inside its hole either way.
+        func room(upright: Double) -> Double {
+            max(0, holeRadius * upright - shaftRadius)
+        }
     }
 
     /// A hand on a body: it steers the body toward a place and a way of facing, with limited strength.
@@ -52,8 +74,15 @@ struct World: Sendable {
         var torque: Double
     }
 
+    /// A steady force on a body, through its centre of mass.
+    struct Push: Sendable {
+        var body: Int
+        var force: Vector
+    }
+
     var bodies: [Body] = []
     var holds: [Hold] = []
+    var pushes: [Push] = []
     /// Every piece, in its body's frame, or in the world's frame when it is fixed.
     var parts: [Part] = []
     var sleeves: [Sleeve] = []
@@ -69,26 +98,36 @@ struct World: Sendable {
     var damping = 2.5
     /// Two surfaces closer than this are watched for contact.
     var margin = 0.1
-    /// The farthest any point may travel in one small step: well under the thinnest wire's radius.
-    var reachPerStep = 0.4
-    /// How many times the contacts are gone over in one small step. Contacts that share a body, as the two
-    /// rails share a ring, need several passes to agree on how the load divides between them. With too few,
-    /// friction is given less than its due and a part that should hold still creeps.
+
+    /// The longest a step may be, in seconds. A step is shorter while something moves fast.
+    var longestStep = 1.0 / 1200
+    /// The farthest any point may travel on its own in one step.
+    var freeReach = 0.2
+    /// The farthest the solver may move any point of a body in one step.
+    var correctionReach = 0.15
+    /// The deepest two surfaces may overlap at the end of a step. With the two reaches it must stay under the
+    /// thinnest pair of parts, an eye on the bar, 1.35 mm together: 0.5 + 2 × (0.2 + 0.15) = 1.2.
+    var overlapLimit = 0.5
+
+    /// How many times the contacts are gone over in a step, at least and at most. Contacts that share a body,
+    /// as the two rails share a ring, need several passes to agree on how its load divides, and a jammed part
+    /// needs many. The passes go on past the least number while any overlap is deeper than `settledOverlap`.
     var sweeps = 8
+    var mostSweeps = 32
+    var settledOverlap = 0.02
 
-    /// The deepest any two surfaces have been left overlapping at the end of a small step, since the world
-    /// was made.
-    ///
-    /// This is the proof that nothing has passed through anything. No point travels more than `reachPerStep`
-    /// in a step, so for one wire to cross another, some step must end with the two overlapping by nearly their
-    /// whole thickness. While this stays a small part of a wire's radius, no crossing can have happened.
+    /// The deepest any two surfaces have overlapped at the end of a step, since the world was made.
     private(set) var deepestOverlap = 0.0
+    /// How many steps were not taken because they would have ended with too deep an overlap. A part that is
+    /// pulled or pushed into a jam stops there: the world stands still for as long as the force lasts.
+    private(set) var refusedSteps = 0
 
+    private var lastOverlap = 0.0
     private var placed: [Piece] = []
     private var contacts: [Contact] = []
     private var approaches: [Approach] = []
 
-    /// A place where two pieces touch or nearly touch, kept for one small step.
+    /// A place where two pieces touch or nearly touch, kept for one step.
     private struct Contact {
         var bodyA: Int?
         var bodyB: Int?
@@ -125,43 +164,87 @@ struct World: Sendable {
         }
     }
 
-    /// Advances the world by `time`, in `steps` small steps.
-    mutating func advance(by time: Double, steps: Int) {
-        let step = time / Double(steps)
-        for _ in 0..<steps {
-            for index in bodies.indices {
-                bodies[index].gainSpeed(over: step, acceleration: gravity, damping: damping)
-            }
-            for hold in holds {
-                bodies[hold.body].steer(
-                    toward: hold.position, facing: hold.orientation,
-                    over: step, settleTime: hold.settleTime, topSpeed: hold.topSpeed, force: hold.force, torque: hold.torque
-                )
-            }
-            for index in bodies.indices {
-                bodies[index].move(over: step, reach: reachPerStep)
-            }
-            findContacts()
-            for _ in 0..<sweeps {
-                for index in contacts.indices {
-                    var contact = contacts[index]
-                    separate(&contact)
-                    contacts[index] = contact
-                }
-                for sleeve in sleeves {
-                    straighten(sleeve)
-                }
-            }
-            for contact in contacts where contact.friction > 0 {
-                deepestOverlap = max(deepestOverlap, overlap(at: contact))
-            }
-            for index in bodies.indices {
-                bodies[index].deriveVelocity(over: step)
-            }
-            for contact in contacts where contact.push > 0 {
-                settleVelocity(at: contact)
-            }
+    // MARK: Stepping
+
+    /// Advances the world by `time` seconds.
+    mutating func advance(by time: Double) {
+        var remaining = time
+        while remaining > 1e-9 {
+            let step = min(remaining, stepLength)
+            take(step)
+            remaining -= step
         }
+    }
+
+    /// A step short enough that nothing travels farther than `freeReach` in it, down to a thirty-second of
+    /// the longest step. Past that a body is slowed instead.
+    private var stepLength: Double {
+        let fastest = (bodies.map(\.speedBound).max() ?? 0) + simd_length(gravity) * longestStep
+        guard fastest > 0 else { return longestStep }
+        return max(longestStep / 32, min(longestStep, freeReach / fastest))
+    }
+
+    private mutating func take(_ step: Double) {
+        let start = bodies
+
+        for index in bodies.indices {
+            bodies[index].gainSpeed(over: step, acceleration: gravity, damping: damping)
+        }
+        for push in pushes {
+            bodies[push.body].velocity += push.force * (bodies[push.body].inverseMass * step)
+        }
+        for hold in holds {
+            bodies[hold.body].steer(
+                toward: hold.position, facing: hold.orientation,
+                over: step, settleTime: hold.settleTime, topSpeed: hold.topSpeed, force: hold.force, torque: hold.torque
+            )
+        }
+        for index in bodies.indices {
+            bodies[index].move(over: step, reach: freeReach)
+        }
+
+        findContacts()
+        var sweep = 0
+        repeat {
+            solve()
+            sweep += 1
+        } while sweep < sweeps || (sweep < mostSweeps && worstOverlap > settledOverlap)
+        for index in bodies.indices {
+            bodies[index].limitCorrection(to: correctionReach)
+        }
+
+        // An overlap left from before may stay as it is while it is being worked off, but never deepen.
+        let overlap = worstOverlap
+        guard overlap <= max(overlapLimit, lastOverlap) else {
+            refuse(backTo: start)
+            return
+        }
+        lastOverlap = overlap
+        deepestOverlap = max(deepestOverlap, overlap)
+
+        for index in bodies.indices {
+            bodies[index].deriveVelocity(over: step)
+        }
+        for contact in contacts where contact.push > 0 {
+            settleVelocity(at: contact)
+        }
+    }
+
+    /// Puts every body back where the step began, and stops the bodies that were being driven into each
+    /// other, so that they do not simply try again.
+    private mutating func refuse(backTo start: [Body]) {
+        var stopped = start
+        for contact in contacts where overlap(at: contact) > overlapLimit {
+            if let a = contact.bodyA { stopped[a].halt() }
+            if let b = contact.bodyB { stopped[b].halt() }
+        }
+        bodies = stopped
+        refusedSteps += 1
+    }
+
+    /// The deepest overlap among the places being watched, as the bodies are now.
+    private var worstOverlap: Double {
+        contacts.reduce(0) { max($0, overlap(at: $1)) }
     }
 
     // MARK: Finding contacts
@@ -192,7 +275,7 @@ struct World: Sendable {
                 Piece.approaches(a, b, within: a.radius + b.radius + margin, into: &approaches)
                 for approach in approaches {
                     let distance = approach.distance
-                    // Two cores that cross leave no direction to push in. The step limit keeps them from getting there.
+                    // Two middles that meet leave no direction to push in. The limits on a step keep them apart.
                     guard distance > 1e-9 else { continue }
                     let normal = (approach.pointA - approach.pointB) / distance
                     let surfaceA = approach.pointA - normal * a.radius
@@ -218,9 +301,7 @@ struct World: Sendable {
             )
             let hole = bodies[sleeve.holeBody].worldPoint(sleeve.hole)
             let facing = bodies[sleeve.holeBody].orientation.act(sleeve.holeNormal)
-            // A leaning shaft cuts the sheet in a longer oval, which leaves its middle line less room.
-            let upright = abs(simd_dot(simd_normalize(shaft.end - shaft.start), facing))
-            let room = max(0, sleeve.holeRadius * upright - sleeve.shaftRadius)
+            let room = sleeve.room(upright: abs(simd_dot(simd_normalize(shaft.end - shaft.start), facing)))
             let nearest = shaft.nearestPoint(to: hole)
             let distance = simd_distance(nearest, hole)
             guard distance > room - margin, distance > 1e-9 else { continue }
@@ -236,30 +317,24 @@ struct World: Sendable {
         }
     }
 
-    /// Turns a shaft and the sheet it runs through toward each other where the shaft leans in its hole more
-    /// than the rims allow.
-    private mutating func straighten(_ sleeve: Sleeve) {
-        let shaft = bodies[sleeve.shaftBody]
-        let sheet = bodies[sleeve.holeBody]
-        let along = simd_normalize(shaft.orientation.act(sleeve.shaft.end - sleeve.shaft.start))
-        var facing = sheet.orientation.act(sleeve.holeNormal)
-        if simd_dot(along, facing) < 0 { facing = -facing }
-
-        let axis = simd_cross(along, facing)
-        let sine = simd_length(axis)
-        guard sine > 1e-9 else { return }
-        let excess = atan2(sine, simd_dot(along, facing)) - sleeve.steepestLean
-        guard excess > 0 else { return }
-
-        let hinge = axis / sine
-        let give = shaft.turnYield(about: hinge) + sheet.turnYield(about: hinge)
-        guard give > 0 else { return }
-        let twist = hinge * (excess / give)
-        bodies[sleeve.shaftBody].turn(by: twist)
-        bodies[sleeve.holeBody].turn(by: -twist)
-    }
-
     // MARK: Solving contacts
+
+    /// Goes over every sleeve and every contact once.
+    ///
+    /// The contacts are always taken in the same order. Going over them backward on alternate passes was
+    /// tried, to keep any one contact from always taking up what the others leave over, and made things worse:
+    /// friction then held less well, and a toy that should have been still kept creeping.
+    private mutating func solve() {
+        // The leaning limits come first: the contacts after them put each shaft back in its hole.
+        for sleeve in sleeves {
+            straighten(sleeve)
+        }
+        for index in contacts.indices {
+            var contact = contacts[index]
+            separate(&contact)
+            contacts[index] = contact
+        }
+    }
 
     private func worldPoint(_ point: Vector, of body: Int?) -> Vector {
         body.map { bodies[$0].worldPoint(point) } ?? point
@@ -269,18 +344,18 @@ struct World: Sendable {
         body.map { bodies[$0].previousWorldPoint(point) } ?? point
     }
 
-    /// How far the touching points of a contact part along `direction` for each unit of push between them.
-    private func give(at contact: Contact, along direction: Vector) -> Double {
-        (contact.bodyA.map { bodies[$0].yield(at: worldPoint(contact.pointA, of: $0), along: direction) } ?? 0)
-            + (contact.bodyB.map { bodies[$0].yield(at: worldPoint(contact.pointB, of: $0), along: direction) } ?? 0)
-    }
-
     /// How far the two surfaces of a contact overlap along its normal; negative while they are apart.
     private func overlap(at contact: Contact) -> Double {
         simd_dot(
             worldPoint(contact.pointB, of: contact.bodyB) - worldPoint(contact.pointA, of: contact.bodyA),
             contact.normal
         )
+    }
+
+    /// How far the touching points of a contact part along `direction` for each unit of push between them.
+    private func give(at contact: Contact, along direction: Vector) -> Double {
+        (contact.bodyA.map { bodies[$0].yield(at: worldPoint(contact.pointA, of: $0), along: direction) } ?? 0)
+            + (contact.bodyB.map { bodies[$0].yield(at: worldPoint(contact.pointB, of: $0), along: direction) } ?? 0)
     }
 
     /// Moves the two bodies of a contact as a push on A, and its opposite on B, at the touching points would.
@@ -292,7 +367,7 @@ struct World: Sendable {
     /// Moves the two surfaces of a contact apart where they overlap, and holds them from sliding as far as
     /// friction can.
     ///
-    /// Both the push and the hold are kept as totals for the step and corrected on each sweep, so the push can
+    /// Both the push and the hold are kept as totals for the step and corrected on each pass, so the push can
     /// be taken back if another contact has since moved the surfaces apart, and the hold never exceeds
     /// friction's share of the push.
     private mutating func separate(_ contact: inout Contact) {
@@ -325,6 +400,30 @@ struct World: Sendable {
         }
         displace(contact, by: hold - contact.hold)
         contact.hold = hold
+    }
+
+    /// Turns a shaft and the sheet it runs through toward each other where the shaft leans in its hole more
+    /// than the rims allow. The two get equal and opposite twists, each about its own centre of mass, so the
+    /// correction adds no momentum; the sleeve's contact then brings the shaft back to the hole.
+    private mutating func straighten(_ sleeve: Sleeve) {
+        let shaft = bodies[sleeve.shaftBody]
+        let sheet = bodies[sleeve.holeBody]
+        let along = simd_normalize(shaft.orientation.act(sleeve.shaft.end - sleeve.shaft.start))
+        var facing = sheet.orientation.act(sleeve.holeNormal)
+        if simd_dot(along, facing) < 0 { facing = -facing }
+
+        let axis = simd_cross(along, facing)
+        let sine = simd_length(axis)
+        guard sine > 1e-9 else { return }
+        let excess = atan2(sine, simd_dot(along, facing)) - sleeve.steepestLean
+        guard excess > 0 else { return }
+
+        let hinge = axis / sine
+        let give = shaft.turnYield(about: hinge) + sheet.turnYield(about: hinge)
+        guard give > 0 else { return }
+        let twist = hinge * (excess / give)
+        bodies[sleeve.shaftBody].turn(by: twist)
+        bodies[sleeve.holeBody].turn(by: -twist)
     }
 
     /// Takes away the speed at which the two surfaces of a contact still close or part, so that nothing bounces.

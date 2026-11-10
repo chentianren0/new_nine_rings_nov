@@ -23,6 +23,9 @@ struct Body: Sendable {
     /// Where the body was when the step being solved began.
     private(set) var previousPosition: Vector
     private(set) var previousOrientation: simd_quatd
+    /// Where the body's own motion had carried it in this step, before anything pushed it back.
+    private(set) var movedPosition: Vector
+    private(set) var movedOrientation: simd_quatd
 
     init(position: Vector, orientation: simd_quatd, mass: Double, inertia: Vector, halfSize: Vector) {
         self.position = position
@@ -32,6 +35,13 @@ struct Body: Sendable {
         self.halfSize = halfSize
         self.previousPosition = position
         self.previousOrientation = orientation
+        self.movedPosition = position
+        self.movedOrientation = orientation
+    }
+
+    /// An upper bound on how fast any point of the body is moving.
+    var speedBound: Double {
+        simd_length(velocity) + simd_length(angularVelocity) * extent
     }
 
     /// A point given in the body's frame, in world coordinates.
@@ -80,7 +90,7 @@ struct Body: Sendable {
         return simd_dot(local * inverseInertia, local)
     }
 
-    /// Turns the body as a twist about its centre of mass would, without touching its velocity.
+    /// Turns the body about its centre of mass as a twist would, without touching its velocity.
     mutating func turn(by twist: Vector) {
         rotate(by: orientation.act(orientation.inverse.act(twist) * inverseInertia))
     }
@@ -160,24 +170,37 @@ struct Body: Sendable {
 
     /// Carries the body through a time step at the speed it has, remembering where it started.
     ///
-    /// No point of the body travels farther than `reach` in the step, so that a thin wire cannot pass through
-    /// another between two steps.
+    /// No point of the body travels farther than `reach` in the step: a body that would is slowed, moving and
+    /// turning alike.
     mutating func move(over step: Double, reach: Double) {
         previousPosition = position
         previousOrientation = orientation
 
-        let fastest = reach / step
-        let speed = simd_length(velocity)
-        if speed > fastest {
-            velocity *= fastest / speed
+        let travel = speedBound * step
+        if travel > reach {
+            velocity *= reach / travel
+            angularVelocity *= reach / travel
         }
-        let spin = simd_length(angularVelocity) * extent
-        if spin > fastest {
-            angularVelocity *= fastest / spin
-        }
-
         position += velocity * step
         rotate(by: angularVelocity * step)
+
+        movedPosition = position
+        movedOrientation = orientation
+    }
+
+    /// Holds what the solver has done to the body in this step to at most `reach` for any of its points.
+    ///
+    /// Whatever correction is left over is made in the steps that follow. This is what keeps a correction from
+    /// carrying one wire past another.
+    mutating func limitCorrection(to reach: Double) {
+        let shift = position - movedPosition
+        let change = orientation * movedOrientation.inverse
+        let angle = 2 * atan2(simd_length(change.imag), abs(change.real))
+        let travel = simd_length(shift) + angle * extent
+        guard travel > reach else { return }
+        let share = reach / travel
+        position = movedPosition + shift * share
+        orientation = simd_slerp(movedOrientation, orientation, share)
     }
 
     /// Stops the body where it is.

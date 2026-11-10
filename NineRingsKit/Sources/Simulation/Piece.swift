@@ -89,9 +89,9 @@ struct Piece: Sendable {
         case (.segment(let s), .segment(let t)):
             let nearest = Approaches.nearest(s, t)
             direct(nearest.pointA, nearest.pointB)
-        case (.segment(let s), .polyline(let core)): search(s, core, samples: wireSamples)
+        case (.segment(let s), .polyline(let core)): search(s, core, samples: tipSamples)
         case (.segment(let s), .stadium(let core)): search(s, core, samples: wireSamples)
-        case (.polyline(let core), .segment(let s)): searchFromB(s, core, samples: wireSamples)
+        case (.polyline(let core), .segment(let s)): searchFromB(s, core, samples: tipSamples)
         case (.stadium(let core), .segment(let s)): searchFromB(s, core, samples: wireSamples)
 
         case (.circle(let c), .segment(let core)): search(c, core, samples: samples(for: c))
@@ -108,13 +108,27 @@ struct Piece: Sendable {
                 searchFromB(d, c, samples: samples(for: d))
             }
 
-        // The sword's tip and the bar are too far apart on the toy to meet, and there is one of each.
-        case (.polyline, .polyline), (.polyline, .stadium), (.stadium, .polyline), (.stadium, .stadium):
+        // A chain of straight pieces is searched piece by piece. The sword's tip and the bar are far apart
+        // on a toy at rest, but a hard pull can swing the bar up to the tip.
+        case (.polyline(let chain), .stadium(let core)):
+            for (start, end) in zip(chain.points, chain.points.dropFirst()) {
+                search(Segment(start: start, end: end), core, samples: 3)
+            }
+        case (.stadium(let core), .polyline(let chain)):
+            for (start, end) in zip(chain.points, chain.points.dropFirst()) {
+                searchFromB(Segment(start: start, end: end), core, samples: 3)
+            }
+
+        // There is one sword and one bar, so these never meet.
+        case (.polyline, .polyline), (.stadium, .stadium):
             break
         }
     }
 
     private static let wireSamples = 12
+    /// A shaft against the sword's curved tip can touch it in two places close together, so it is walked in
+    /// finer steps there.
+    private static let tipSamples = 24
 
     /// A ring is walked in sixteen steps and an eye in twelve: about five and two millimetres of wire a step.
     private static func samples(for circle: Circle) -> Int {
