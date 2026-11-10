@@ -2,7 +2,8 @@ import Puzzle
 import SwiftUI
 
 /// Nine markers, ring 1 on the left as in the side view, filled for a ring that is on. Tapping one moves that
-/// ring if the rule allows; otherwise the ring in the way is marked and a line says why.
+/// ring if the rule allows; otherwise the ring in the way is marked and a line says why. While a hand moves a
+/// ring, its marker has a dashed ring around it and taps wait.
 struct RingStrip: View {
     let model: ToyModel
 
@@ -39,6 +40,7 @@ struct RingStrip: View {
     }
 
     private func role(of ring: Int) -> RingMarker.Role {
+        if ring == model.handMove?.ring { return .onItsWay }
         guard let refusal = model.refusal else { return .plain }
         if ring == refusal.ring { return .refused }
         if ring == refusal.blockingRing { return .blocking }
@@ -46,6 +48,9 @@ struct RingStrip: View {
     }
 
     private var message: String {
+        if let move = model.handMove {
+            return move.target.isOn(move.ring) ? "Putting ring \(move.ring) on" : "Taking ring \(move.ring) off"
+        }
         guard let refusal = model.refusal else {
             return model.state == .allOff ? "All rings are off" : "Tap a ring to move it"
         }
@@ -60,7 +65,7 @@ struct RingStrip: View {
 
 /// One ring's marker: a filled disc when the ring is on, an outline when it is off.
 private struct RingMarker: View {
-    enum Role { case plain, refused, blocking }
+    enum Role { case plain, refused, blocking, onItsWay }
 
     let ring: Int
     let isOn: Bool
@@ -75,11 +80,8 @@ private struct RingMarker: View {
                         .fill(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear))
                     Circle()
                         .strokeBorder(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary), lineWidth: 1.5)
-                    if role != .plain {
-                        Circle()
-                            .strokeBorder(highlight, lineWidth: 3)
-                            .padding(-5)
-                    }
+                    halo
+                        .padding(-5)
                 }
                 .frame(width: 22, height: 22)
                 .padding(5)
@@ -93,10 +95,28 @@ private struct RingMarker: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Ring \(ring)")
         .accessibilityValue(isOn ? "On" : "Off")
-        .accessibilityHint(role == .blocking ? "Blocks the ring you tapped" : "Moves this ring")
+        .accessibilityHint(hint)
     }
 
-    private var highlight: Color {
-        role == .refused ? .red : .orange
+    @ViewBuilder
+    private var halo: some View {
+        switch role {
+        case .plain:
+            EmptyView()
+        case .refused:
+            Circle().strokeBorder(.red, lineWidth: 3)
+        case .blocking:
+            Circle().strokeBorder(.orange, lineWidth: 3)
+        case .onItsWay:
+            Circle().strokeBorder(.tint, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+        }
+    }
+
+    private var hint: String {
+        switch role {
+        case .blocking: "Blocks the ring you tapped"
+        case .onItsWay: "A hand is moving this ring"
+        case .plain, .refused: "Moves this ring"
+        }
     }
 }
