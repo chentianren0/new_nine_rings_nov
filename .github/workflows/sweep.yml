@@ -1,0 +1,38 @@
+name: Every state
+
+# The long check: all 511 states with a ring on, simulated for three seconds each, to see that the toy holds
+# together in every one. It takes several minutes, so it runs only when the simulation or the toy's shapes
+# change, or when asked for by hand.
+
+on:
+  pull_request:
+    paths:
+      - "NineRingsKit/Sources/Simulation/**"
+      - "NineRingsKit/Sources/Toy/**"
+      - "NineRingsKit/Tests/SimulationTests/**"
+      - "NineRingsKit/Package.swift"
+      - ".github/workflows/sweep.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  sweep:
+    name: Every state holds together
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Simulate every state
+        run: swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter everyStateHoldsTogether
+        env:
+          NINE_RINGS_FULL_SWEEP: "1"

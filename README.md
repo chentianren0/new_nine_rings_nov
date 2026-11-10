@@ -40,6 +40,16 @@ A simulator build has to name a simulator: the destination "Any iOS Simulator De
 
 The app is built with pointer authentication. `NineRings.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings` makes Xcode build the package the same way.
 
+## Checks on GitHub
+
+A pull request that touches the package, the app or the project runs the package's tests and builds the app for the Mac and for iPhone and iPad (`.github/workflows/checks.yml`). One that touches the simulation or the toy's shapes also simulates all 511 states with a ring on, for three seconds each, which takes several minutes (`.github/workflows/sweep.yml`). Both run on the Xcode the project is developed with, and both can be started by hand from the Actions tab.
+
+To run the long check at home:
+
+```bash
+NINE_RINGS_FULL_SWEEP=1 swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter everyStateHoldsTogether
+```
+
 ## Seeing the app
 
 A debug build of the Mac app can draw the toy to PNG files without opening a window, so an agent can look at what the app renders. It uses the app's own scene, rest poses and camera framing, rendered offscreen by RealityKit.

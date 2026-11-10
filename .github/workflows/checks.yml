@@ -1,0 +1,40 @@
+name: Checks
+
+# The package's tests, and a build of the app for the Mac and for iPhone and iPad.
+# They run on the Xcode that the project is developed with, so a result here means the same as one at home.
+
+on:
+  pull_request:
+    paths:
+      - "NineRingsKit/**"
+      - "NineRings/**"
+      - "NineRings.xcodeproj/**"
+      - ".github/workflows/checks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  checks:
+    name: Tests and builds
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test the package
+        run: swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing
+
+      - name: Build the app for the Mac
+        run: xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
+
+      - name: Build the app for iPhone and iPad
+        run: xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO
