@@ -6,6 +6,12 @@ import simd
 ///
 /// The poses were solved without friction, so rings lie flatter across the rails than on a real toy. They hold
 /// the toy's topology and no part overlaps another. They serve until the simulation settles its own.
+///
+/// The solver kept the middle of the bar at one place along the sword in every state, so with few rings on
+/// it left those rings far from the tip. A person moves rings at the tip, and the rings that are on stay
+/// where the bar holds them from there. So each pose is given slid along the rails until the first ring that
+/// is on lies where it lies when all nine are on. The rails are straight and level there, and a pose slid
+/// along them rests as well as before.
 public enum RestPoses {
     public static func pose(for state: PuzzleState) -> ToyPose {
         guard let pose = all[state] else {
@@ -41,6 +47,18 @@ public enum RestPoses {
                 )
             }
             poses[state] = ToyPose(rings: Array(placed[0..<9]), rods: Array(placed[9..<18]), bar: placed[18])
+        }
+
+        guard let allOn = poses[.allOn] else {
+            preconditionFailure("no rest pose stored for the state with every ring on")
+        }
+        for (state, pose) in poses {
+            guard let first = (1...9).first(where: { state.isOn($0) }) else { continue }
+            let slide = SIMD3(allOn.ring(first).position.x - pose.ring(first).position.x, 0, 0)
+            func slid(_ part: PartPose) -> PartPose {
+                PartPose(position: part.position + slide, orientation: part.orientation)
+            }
+            poses[state] = ToyPose(rings: pose.rings.map(slid), rods: pose.rods.map(slid), bar: slid(pose.bar))
         }
         return poses
     }
