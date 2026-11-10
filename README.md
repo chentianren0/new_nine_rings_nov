@@ -8,13 +8,14 @@ An Apple-native app, for iPhone, iPad and Mac, that shows how a Chinese nine lin
 - `NineRingsKit/`: a Swift package with everything that does not depend on the interface.
   - `Puzzle`: which rings are on, the rule that says which ring can move, and the one path through all 512 states.
   - `Toy`: the toy's dimensions, the pose of every part, and a settled pose for each state.
+  - `Simulation`: the toy in motion. Nine rings, nine rods and the bar are rigid bodies around the fixed sword, under gravity, that touch and rub but never pass through one another.
 
 ## Building and testing
 
-Run the package's tests:
+Run the package's tests. They are built with optimization, because the simulation's tests are slow without it:
 
 ```bash
-swift test --package-path NineRingsKit
+swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing
 ```
 
 Open `NineRings.xcodeproj` in Xcode 27.2 or later and run the `NineRings` scheme on My Mac or on an iOS simulator.

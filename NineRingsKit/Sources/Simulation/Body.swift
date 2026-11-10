@@ -58,6 +58,17 @@ struct Body: Sendable {
         return inverseMass + simd_dot(twist * inverseInertia, twist)
     }
 
+    /// How readily the body turns about `axis`: the angle it turns for each unit of twist.
+    func turnYield(about axis: Vector) -> Double {
+        let local = orientation.inverse.act(axis)
+        return simd_dot(local * inverseInertia, local)
+    }
+
+    /// Turns the body as a twist about its centre of mass would, without touching its velocity.
+    mutating func turn(by twist: Vector) {
+        rotate(by: orientation.act(orientation.inverse.act(twist) * inverseInertia))
+    }
+
     /// The turn a push at `point` gives, as a rotation vector in the world.
     private func turn(from push: Vector, at point: Vector) -> Vector {
         orientation.act(orientation.inverse.act(simd_cross(point - position, push)) * inverseInertia)

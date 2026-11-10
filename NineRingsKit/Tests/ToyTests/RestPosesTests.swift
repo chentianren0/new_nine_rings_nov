@@ -34,14 +34,9 @@ private func crossings(of path: [SIMD3<Double>], throughRing ring: PartPose) -> 
         }
     }
 
-    @Test func aRingIsOnExactlyWhenBothRailsPassThroughIt() {
-        let rails = [SwordShape.centerline(side: 1), SwordShape.centerline(side: -1)]
+    @Test func theStateReadFromEachPoseIsItsState() {
         for state in allStates {
-            let pose = RestPoses.pose(for: state)
-            for ring in PuzzleState.rings {
-                let through = rails.map { crossings(of: $0, throughRing: pose.ring(ring)) }
-                #expect(through == (state.isOn(ring) ? [1, 1] : [0, 0]), "state \(state), ring \(ring)")
-            }
+            #expect(RestPoses.pose(for: state).ringsOnTheSword == state)
         }
     }
 
