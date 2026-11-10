@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "Puzzle", targets: ["Puzzle"]),
         .library(name: "Toy", targets: ["Toy"]),
+        .library(name: "Simulation", targets: ["Simulation"]),
     ],
     targets: [
         .target(
@@ -19,7 +20,13 @@ let package = Package(
             resources: [.process("Resources")],
             swiftSettings: [.strictMemorySafety()]
         ),
+        .target(
+            name: "Simulation",
+            dependencies: ["Puzzle", "Toy"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         .testTarget(name: "PuzzleTests", dependencies: ["Puzzle"]),
         .testTarget(name: "ToyTests", dependencies: ["Toy"]),
+        .testTarget(name: "SimulationTests", dependencies: ["Simulation"]),
     ]
 )
