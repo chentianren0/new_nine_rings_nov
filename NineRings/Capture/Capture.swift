@@ -17,6 +17,11 @@ import Toy
 /// `-capture-settle 2` lets the simulation run for that many seconds from the stored pose before drawing.
 /// Each image is named `<state>-<view>-<appearance>.png`, with `-settled` after the state when it was left
 /// to settle. The scene, the poses and the framing are the app's own.
+///
+/// `-capture-moves 1,1 -capture-every 0.5` shows moves instead: the first state is left to settle, then a
+/// hand moves each of those rings in turn, off the sword if it is on and back on if it is off, and waits
+/// for the toy to come to rest before the next. The toy is drawn every so many seconds from when the first
+/// hand began. Those images are named `<state>-moves-t<time>-<view>-<appearance>.png`.
 @MainActor
 enum Capture {
     struct Request {
@@ -25,6 +30,8 @@ enum Capture {
         var focus: (center: SIMD3<Float>, size: Float)?
         /// How long the simulation runs from the stored pose before the toy is drawn; nil to draw the stored pose.
         var settle: Double?
+        /// Rings for a hand to move in turn, and how many seconds pass between drawings of the toy.
+        var moves: (rings: [Int], every: Double)?
         var directory: URL
         var size: CGSize
         var appearance: Backdrop.Appearance
@@ -36,6 +43,43 @@ enum Capture {
         do {
             try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
             let renderer = try await Renderer(size: request.size, appearance: request.appearance)
+            if let moves = request.moves, let state = request.states.first {
+                var toy = ToySimulation(pose: RestPoses.pose(for: state))
+                for _ in 0..<240 {
+                    toy.advance(by: 1.0 / 120)
+                }
+                var time = 0.0
+                var nextDrawing = 0.0
+                func draw() async throws {
+                    for view in request.views {
+                        let stamp = String(format: "%05.2f", time)
+                        let name = "\(state)-moves-t\(stamp)-\(view.name)-\(request.appearance.rawValue).png"
+                        let url = request.directory.appending(path: name)
+                        try await renderer.render(toy.pose, view: view, focus: request.focus, to: url)
+                        print("capture: wrote \(url.path)")
+                    }
+                }
+                for ring in moves.rings {
+                    guard toy.move(ring: ring) else {
+                        print("capture: a hand cannot move ring \(ring) while the toy reads \(toy.pose.ringsOnTheSword)")
+                        continue
+                    }
+                    // A move that has not come to rest in half a minute is cut short, so a jam still ends.
+                    var steps = 0
+                    while !toy.isAtRest && steps < 120 * 30 {
+                        if time >= nextDrawing - 1e-9 {
+                            try await draw()
+                            nextDrawing += moves.every
+                        }
+                        toy.advance(by: 1.0 / 120)
+                        time += 1.0 / 120
+                        steps += 1
+                    }
+                    print("capture: ring \(ring) moved, the toy reads \(toy.pose.ringsOnTheSword) at \(String(format: "%.2f", time)) s\(toy.isAtRest ? "" : ", not at rest")")
+                }
+                try await draw()
+                exit(0)
+            }
             for state in request.states {
                 let pose = pose(for: state, settledFor: request.settle)
                 for view in request.views {
@@ -79,7 +123,9 @@ enum Capture {
         let size = dimensions.count == 2 ? CGSize(width: dimensions[0], height: dimensions[1]) : CGSize(width: 1600, height: 1000)
         let appearance = value("-capture-appearance").flatMap(Backdrop.Appearance.init(rawValue:)) ?? .light
         let settle = value("-capture-settle").flatMap { Double($0) }
-        return Request(states: states, views: views, focus: focus, settle: settle, directory: directory, size: size, appearance: appearance)
+        let every = value("-capture-every").flatMap { Double($0) } ?? 0.5
+        let moves = value("-capture-moves").map { (rings: $0.split(separator: ",").compactMap { Int($0) }, every: max(every, 0.05)) }
+        return Request(states: states, views: views, focus: focus, settle: settle, moves: moves, directory: directory, size: size, appearance: appearance)
     }
 
     /// Where a capture looks from.

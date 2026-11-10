@@ -1,4 +1,5 @@
 import Foundation
+import Puzzle
 import Toy
 import simd
 
@@ -10,6 +11,9 @@ public struct ToySimulation: Sendable {
     private let rodCenterY: Double
     /// The hand that holds the bar while no ring is on the sword.
     private var barHold: World.Hold?
+    /// The hand that is moving a ring, and where it holds that ring now.
+    private var hand: Hand?
+    private var ringHold: World.Hold?
     private var calmTime = 0.0
 
     /// Whether every part has stayed still for a moment. A toy at rest stays as it is, and `advance` leaves it
@@ -78,18 +82,97 @@ public struct ToySimulation: Sendable {
         world.pushes = [World.Push(body: number - 1, force: gramsWeight * 9810)]
     }
 
+    /// Whether a hand is moving a ring just now.
+    public var handIsBusy: Bool { hand != nil }
+
+    /// Has a hand move a ring: off the sword if the ring is on it, and back on if it is off. The hand takes
+    /// the way a person takes, and the ring is moved by the hand and by everything it meets on that way.
+    ///
+    /// Gives `false`, and does nothing, where a hand is not yet able to move that ring: see
+    /// `aHandCanMove(ring:in:)`. A hand that has begun can still fail, and then lets its ring go; whether the
+    /// ring arrived is read from `pose` once the toy is at rest.
+    @discardableResult
+    public mutating func move(ring number: Int) -> Bool {
+        guard hand == nil, Self.aHandCanMove(ring: number, in: pose.ringsOnTheSword) else { return false }
+        setAHand(to: number)
+        return true
+    }
+
+    /// Whether a hand is able to move a ring of a toy in a state, as far as is known before it tries.
+    ///
+    /// So far a hand moves ring 1 only: for any other ring a second hand has first to lift the ring before
+    /// it out of the way. And it moves ring 1 only where the toy hangs in a way it can handle:
+    ///
+    /// - The bar hangs within 45 degrees of level, before and after. With few rings on, the bar hangs
+    ///   steeply from one end and jams every rod in its hole; a person would steady the bar in the other hand.
+    /// - Off the sword, the ring's eye is no more than 60 millimetres under the rails. At the end of a chain
+    ///   of four or more rings that are off it hangs lower, down by the bar's end.
+    public static func aHandCanMove(ring number: Int, in state: PuzzleState) -> Bool {
+        guard number == 1, state.canMove(number) else { return false }
+        let on = RestPoses.pose(for: state.isOn(number) ? state : state.moving(number))
+        let off = RestPoses.pose(for: state.isOn(number) ? state.moving(number) : state)
+        func tilt(of pose: ToyPose) -> Double {
+            abs(asin(pose.bar.worldDirection(Vector(1, 0, 0)).y))
+        }
+        let steepest = 45 * Double.pi / 180
+        let deepest = -60.0
+        return tilt(of: on) < steepest && tilt(of: off) < steepest && off.rod(number).position.y > deepest
+    }
+
+    /// Sets a hand to move a ring, whether or not it can be expected to get the ring there.
+    mutating func setAHand(to number: Int) {
+        wake()
+        let state = pose.ringsOnTheSword
+        hand = state.isOn(number)
+            ? Hand.takingOff(ring: number)
+            : Hand.puttingOn(ring: number, restingAs: RestPoses.pose(for: state.moving(number)))
+    }
+
     /// Moves the toy on by `time` seconds, unless it is at rest.
     public mutating func advance(by time: Double) {
         guard !isAtRest else { return }
+        moveTheHand(by: time)
         holdTheBarWhileNoRingIsOn()
+        world.holds = [barHold, ringHold].compactMap { $0 }
         world.advance(by: time)
 
-        calmTime = fastestSpeed < Self.restSpeed ? calmTime + time : 0
+        calmTime = (fastestSpeed < Self.restSpeed && hand == nil) ? calmTime + time : 0
         if calmTime >= Self.restTime {
             isAtRest = true
             world.halt()
         }
     }
+
+    /// Moves the hand on along its way and steers its ring toward where the hand now wants it. When the way
+    /// ends, or the hand gives up, it lets go.
+    private mutating func moveTheHand(by time: Double) {
+        guard var busy = hand else { return }
+        if let wanted = busy.advance(by: time, in: pose) {
+            // The hand turns the ring's axis the short way to where it wants it, and asks for no spin about
+            // that axis: the ring is the same however it is spun.
+            let body = world.bodies[busy.ring - 1]
+            let axis = body.orientation.act(Vector(0, 0, 1))
+            let wantedAxis = simd_dot(axis, wanted.axis) < 0 ? -wanted.axis : wanted.axis
+            ringHold = World.Hold(
+                body: busy.ring - 1,
+                position: wanted.centre,
+                orientation: simd_quatd(from: axis, to: wantedAxis) * body.orientation,
+                force: Self.handForce,
+                torque: Self.handTorque
+            )
+            hand = busy
+        } else {
+            ringHold = nil
+            hand = nil
+        }
+    }
+
+    /// The hand is as strong as the weight of about eighty grams, more than all the parts that hang from the
+    /// sword weigh together: enough to lift a ring with whatever hangs from it, and to draw the other rings
+    /// along the rails after it.
+    private static let handForce = 80 * 9810.0
+    /// It turns a ring as that force would, applied at the ring's rim.
+    private static let handTorque = handForce * Dimensions.Ring.radius
 
     /// Lets a toy at rest move again. Whatever is about to disturb it calls this first.
     public mutating func wake() {
@@ -107,6 +190,9 @@ public struct ToySimulation: Sendable {
     /// away. A person would be holding them in the other hand: so a hand takes hold of the bar where it is,
     /// and lets go when a ring is back on.
     private mutating func holdTheBarWhileNoRingIsOn() {
+        // While a hand is moving a ring, the hand on the bar keeps whatever grip it has: letting the bar drop
+        // the moment the first ring is over the slot would tear that ring from the other hand.
+        guard hand == nil else { return }
         let isFree = pose.ringsOnTheSword == .allOff
         if isFree && barHold == nil {
             let bar = world.bodies[Self.barBody]
@@ -120,7 +206,6 @@ public struct ToySimulation: Sendable {
         } else if !isFree {
             barHold = nil
         }
-        world.holds = barHold.map { [$0] } ?? []
     }
 
     private static let barBody = 18
