@@ -12,24 +12,31 @@ An Apple-native app, for iPhone, iPad and Mac, that shows how a Chinese nine lin
 - `NineRingsKit/`: a Swift package with everything that does not depend on the interface.
   - `Puzzle`: which rings are on, the rule that says which ring can move, and the one path through all 512 states.
   - `Toy`: the toy's dimensions, the pose of every part, and a settled pose for each state.
+  - `Simulation`: the toy in motion. Nine rings, nine rods and the bar are rigid bodies around the fixed sword, under gravity, that touch and rub but never pass through one another.
 
 ## Building and testing
 
-Run the package's tests:
+Run the package's tests. They are built with optimization, because the simulation's tests are slow without it:
 
 ```bash
-swift test --package-path NineRingsKit
+swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing
 ```
 
-Open `NineRings.xcodeproj` in Xcode 27.2 or later and run the `NineRings` scheme on My Mac or on an iOS simulator.
+Open `NineRings.xcodeproj` in Xcode 27.2 or later and run the `NineRings` scheme on My Mac.
 
-To compile from the command line without signing:
+To compile from the command line without signing, for the Mac:
 
 ```bash
 xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
 ```
 
-For a simulator, name one, as in `-destination 'platform=iOS Simulator,name=iPhone Duo'`. The destination "Any iOS Simulator Device" does not link, because the package is built without an Intel slice.
+And for iPhone and iPad:
+
+```bash
+xcodebuild -project NineRings.xcodeproj -scheme NineRings -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO
+```
+
+A simulator build has to name a simulator: the destination "Any iOS Simulator Device" does not link, because the package is built without an Intel slice.
 
 The app is built with pointer authentication. `NineRings.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings` makes Xcode build the package the same way.
 
@@ -51,6 +58,7 @@ It writes one image per state and view, named `<state>-<view>-<appearance>.png`,
 
 - `-capture-views`: `side`, `top` and `tip` are the app's camera presets; `yaw:pitch` in degrees, as `25:18`, looks from any other direction.
 - `-capture-focus x,y,z,size`: frames a cube of `size` millimetres around a point in the sword's frame instead of the whole toy, for close checks.
+- `-capture-settle 2`: lets the simulation run for that many seconds from the stored pose before drawing, and adds `-settled` to the name.
 - `-capture-size 1600x1000`: the image size in pixels.
 - `-capture-appearance dark`: the dark background.
 

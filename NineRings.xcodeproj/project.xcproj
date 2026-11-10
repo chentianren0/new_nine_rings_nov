@@ -11,7 +11,10 @@
     ],
   },
   "packages": [
-    { "kind": "local", "path": "NineRingsKit" },
+    {
+      "kind": "local",
+      "path": "NineRingsKit",
+    },
   ],
   "files": [
     { "kind": "folder", "path": "NineRings", "target-membership": [ "NineRings" ] },
@@ -35,8 +38,16 @@
         "resources",
       ],
       "package-product-members": [
-        { "product-name": "Puzzle", "build-phase": { "build-phase": "frameworks" } },
-        { "product-name": "Toy", "build-phase": { "build-phase": "frameworks" } },
+        {
+          "product-name": "Puzzle",
+          "build-phase": { "build-phase": "frameworks" },
+        }, {
+          "product-name": "Simulation",
+          "build-phase": { "build-phase": "frameworks" },
+        }, {
+          "product-name": "Toy",
+          "build-phase": { "build-phase": "frameworks" },
+        },
       ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",

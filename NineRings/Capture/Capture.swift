@@ -4,6 +4,7 @@ import Foundation
 import Metal
 import Puzzle
 import RealityKit
+import Simulation
 import Toy
 
 /// Renders the toy to PNG files without a window and quits: how an agent sees what the app draws.
@@ -13,13 +14,17 @@ import Toy
 /// A view is a preset (`side`, `top`, `tip`) or a yaw and a pitch in degrees, as `30:20`.
 /// Optional: `-capture-size 1600x1000` (pixels), `-capture-appearance dark`, and `-capture-focus x,y,z,size`
 /// to frame a cube of `size` millimetres around a point in the sword's frame instead of the whole toy.
-/// Each image is named `<state>-<view>-<appearance>.png`. The scene, the poses and the framing are the app's own.
+/// `-capture-settle 2` lets the simulation run for that many seconds from the stored pose before drawing.
+/// Each image is named `<state>-<view>-<appearance>.png`, with `-settled` after the state when it was left
+/// to settle. The scene, the poses and the framing are the app's own.
 @MainActor
 enum Capture {
     struct Request {
         var states: [PuzzleState]
         var views: [View]
         var focus: (center: SIMD3<Float>, size: Float)?
+        /// How long the simulation runs from the stored pose before the toy is drawn; nil to draw the stored pose.
+        var settle: Double?
         var directory: URL
         var size: CGSize
         var appearance: Backdrop.Appearance
@@ -32,10 +37,12 @@ enum Capture {
             try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
             let renderer = try await Renderer(size: request.size, appearance: request.appearance)
             for state in request.states {
+                let pose = pose(for: state, settledFor: request.settle)
                 for view in request.views {
-                    let name = "\(state)-\(view.name)-\(request.appearance.rawValue).png"
+                    let settled = request.settle == nil ? "" : "-settled"
+                    let name = "\(state)\(settled)-\(view.name)-\(request.appearance.rawValue).png"
                     let url = request.directory.appending(path: name)
-                    try await renderer.render(state: state, view: view, focus: request.focus, to: url)
+                    try await renderer.render(pose, view: view, focus: request.focus, to: url)
                     print("capture: wrote \(url.path)")
                 }
             }
@@ -44,6 +51,17 @@ enum Capture {
             print("capture: failed: \(error)")
             exit(1)
         }
+    }
+
+    /// The stored pose of a state, or what the simulation makes of it in `seconds`.
+    private static func pose(for state: PuzzleState, settledFor seconds: Double?) -> ToyPose {
+        let stored = RestPoses.pose(for: state)
+        guard let seconds else { return stored }
+        var toy = ToySimulation(pose: stored)
+        for _ in 0..<Int((seconds * 60).rounded()) {
+            toy.advance(by: 1.0 / 60)
+        }
+        return toy.pose
     }
 
     private static func parse(_ arguments: [String]) -> Request? {
@@ -60,7 +78,8 @@ enum Capture {
         let dimensions = (value("-capture-size") ?? "1600x1000").split(separator: "x").compactMap { Double($0) }
         let size = dimensions.count == 2 ? CGSize(width: dimensions[0], height: dimensions[1]) : CGSize(width: 1600, height: 1000)
         let appearance = value("-capture-appearance").flatMap(Backdrop.Appearance.init(rawValue:)) ?? .light
-        return Request(states: states, views: views, focus: focus, directory: directory, size: size, appearance: appearance)
+        let settle = value("-capture-settle").flatMap { Double($0) }
+        return Request(states: states, views: views, focus: focus, settle: settle, directory: directory, size: size, appearance: appearance)
     }
 
     /// Where a capture looks from.
@@ -111,8 +130,7 @@ enum Capture {
             output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))
         }
 
-        func render(state: PuzzleState, view: View, focus: (center: SIMD3<Float>, size: Float)?, to url: URL) async throws {
-            let pose = RestPoses.pose(for: state)
+        func render(_ pose: ToyPose, view: View, focus: (center: SIMD3<Float>, size: Float)?, to url: URL) async throws {
             scene.apply(pose)
             let box = focus.map { ToyBounds(center: $0.center, size: $0.size) } ?? ToyBounds(pose)
             camera.transform = OrbitCamera.framing(yaw: view.yaw, pitch: view.pitch, of: box, in: Viewport(size: size)).transform

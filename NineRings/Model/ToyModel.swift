@@ -1,11 +1,13 @@
 import Observation
 import Puzzle
+import Simulation
 import Toy
 
 /// The app's state: which rings are on, the moves made, and the pose being drawn.
 ///
-/// The pose is not observed by views: the 3D view reads it once a frame, after calling `advance(by:)`. Today
-/// the pose glides between rest poses; the live simulation will take over `advance(by:)` and `pose`.
+/// The pose is not observed by views: the 3D view reads it once a frame, after calling `advance(by:)`. The
+/// pose comes from the live simulation, which lets the toy settle under its own weight. No hand moves a ring
+/// yet, so a change of state glides to that state's stored pose, where the toy is set down afresh.
 @Observable
 final class ToyModel {
     /// Why the last ring tapped could not move.
@@ -30,10 +32,15 @@ final class ToyModel {
     /// Goes up by one whenever `pose` changes, so a reader can skip frames where nothing moved.
     @ObservationIgnored private(set) var poseRevision = 0
     @ObservationIgnored private var blend: PoseBlend?
+    @ObservationIgnored private var simulation: ToySimulation
+
+    /// A gap between two frames longer than this is not made up for: the toy just moves on this much.
+    private static let longestFrame = 1.0 / 30
 
     init(state: PuzzleState = .allOn) {
         self.state = state
-        pose = RestPoses.pose(for: state)
+        simulation = ToySimulation(pose: RestPoses.pose(for: state))
+        pose = simulation.pose
     }
 
     var canUndo: Bool { !history.isEmpty }
@@ -63,16 +70,23 @@ final class ToyModel {
 
     /// Moves the drawing on by `seconds`. Called once a frame.
     func advance(by seconds: Double) {
-        guard var blend else { return }
-        blend.advance(by: seconds)
-        pose = blend.pose
+        if var blend {
+            blend.advance(by: seconds)
+            pose = blend.pose
+            poseRevision += 1
+            self.blend = blend.isFinished ? nil : blend
+            return
+        }
+        guard !simulation.isAtRest else { return }
+        simulation.advance(by: min(seconds, Self.longestFrame))
+        pose = simulation.pose
         poseRevision += 1
-        self.blend = blend.isFinished ? nil : blend
     }
 
     private func show(_ newState: PuzzleState) {
         refusal = nil
         state = newState
-        blend = PoseBlend(from: pose, to: RestPoses.pose(for: newState))
+        simulation = ToySimulation(pose: RestPoses.pose(for: newState))
+        blend = PoseBlend(from: pose, to: simulation.pose)
     }
 }
