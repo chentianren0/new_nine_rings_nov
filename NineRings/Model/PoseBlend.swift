@@ -1,8 +1,8 @@
 import Toy
 import simd
 
-/// A short, eased glide from one pose to another, part by part. It stands in for real motion until the
-/// simulation provides it, so parts may pass through each other on the way.
+/// A short, eased glide from one pose to another, part by part. It stands in for real motion where a hand
+/// cannot move a ring, or has failed to, so parts may pass through each other on the way.
 struct PoseBlend {
     let from: ToyPose
     let to: ToyPose

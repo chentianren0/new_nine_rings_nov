@@ -6,7 +6,7 @@ An Apple-native app, for iPhone, iPad and Mac, that shows how a Chinese nine lin
 
 - `NineRings/` and `NineRings.xcodeproj`: the app, in SwiftUI and RealityKit. The project file is in Xcode's JSON format, and the `NineRings/` folder is synchronized, so adding a file there does not change the project file.
   - `Scene`: the toy drawn in 3D. Meshes are generated from `Dimensions`, and `ToyScene.apply(_:)` places the parts for any `ToyPose`.
-  - `Model`: the app's state, the puzzle state and the pose being drawn.
+  - `Model`: the app's state, the puzzle state and the pose being drawn. A tapped ring is moved by a hand in the simulation where a hand can move it; elsewhere, or when the hand fails, the toy glides to the new state.
   - `Views`: the 3D view with its camera, and the strip of ring markers.
   - `Capture`: renders the toy to image files, in debug builds only (see below).
 - `NineRingsKit/`: a Swift package with everything that does not depend on the interface.
@@ -74,6 +74,7 @@ It writes one image per state and view, named `<state>-<view>-<appearance>.png`,
 - `-capture-focus x,y,z,size`: frames a cube of `size` millimetres around a point in the sword's frame instead of the whole toy, for close checks.
 - `-capture-settle 2`: lets the simulation run for that many seconds from the stored pose before drawing, and adds `-settled` to the name.
 - `-capture-moves 1,1 -capture-every 0.5`: shows moves instead of states at rest. The first state is left to settle, then a hand moves each of those rings in turn and waits for the toy to come to rest, and the toy is drawn every so many seconds. The images are named `<state>-moves-t<time>-<view>-<appearance>.png`, and a line is printed after each move with the state the toy then reads.
+- `-capture-taps 1,1 -capture-every 0.5`: the same through the app's own model, as taps on the ring markers. The first state is left to settle, then each ring is tapped in turn once the toy is still, and the pose the model gives is drawn every so many seconds. A hand moves the ring where it can and the toy glides elsewhere, as in the app. The images are named `<state>-taps-t<time>-<view>-<appearance>.png`, and lines are printed with how each ring moved, when a hand's move ended, and the state the model and the toy then read.
 - `-capture-size 1600x1000`: the image size in pixels.
 - `-capture-appearance dark`: the dark background.
 
