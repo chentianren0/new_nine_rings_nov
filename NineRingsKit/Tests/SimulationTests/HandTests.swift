@@ -30,25 +30,26 @@ private func expectWhole(_ toy: ToySimulation, _ when: Comment) {
     #expect(faults(in: pose).isEmpty, when)
     for number in PuzzleState.rings {
         #expect(eyeHoldsItsRing(number, in: pose), "eye \(number), \(when)")
+        #expect(ringIsRoundTheRodBefore(number, in: pose), "ring \(number), \(when)")
     }
     #expect(!swordGoesThroughTheBar(in: pose), when)
 }
 
-/// Has a hand move ring 1 one way and then back, and expects the toy to read as it should after each move.
-private func moveRingOneThereAndBack(from start: PuzzleState) {
+/// Has hands move a ring one way and then back, and expects the toy to read as it should after each move.
+private func moveThereAndBack(ring: Int, from start: PuzzleState) {
     var toy = settledToy(start)
     #expect(toy.pose.ringsOnTheSword == start, "\(start) at the start")
 
-    let began = toy.move(ring: 1)
-    #expect(began, "\(start): the hand takes the ring")
-    runToRest(&toy)
+    let began = toy.move(ring: ring)
+    #expect(began, "\(start): a hand takes the ring")
+    runToRest(&toy, limit: 40)
     #expect(!toy.handIsBusy)
-    #expect(toy.pose.ringsOnTheSword == start.moving(1), "\(start) after the first move")
+    #expect(toy.pose.ringsOnTheSword == start.moving(ring), "\(start) after the first move")
     expectWhole(toy, "\(start) after the first move")
 
-    let beganAgain = toy.move(ring: 1)
-    #expect(beganAgain, "\(start): the hand takes the ring again")
-    runToRest(&toy)
+    let beganAgain = toy.move(ring: ring)
+    #expect(beganAgain, "\(start): a hand takes the ring again")
+    runToRest(&toy, limit: 40)
     #expect(toy.pose.ringsOnTheSword == start, "\(start) after the move back")
     expectWhole(toy, "\(start) after the move back")
     #expect(toy.refusedSteps == 0, "\(start)")
@@ -59,13 +60,20 @@ private func moveRingOneThereAndBack(from start: PuzzleState) {
     /// and with the bar hanging at a slant: the hand has to cope with what each does to the tip.
     @Test(arguments: ["111111111", "101111111", "100111111", "101010101", "111110000"])
     func aHandTakesRingOneOffAndPutsItBack(_ name: String) throws {
-        moveRingOneThereAndBack(from: try #require(PuzzleState(name)))
+        moveThereAndBack(ring: 1, from: try #require(PuzzleState(name)))
     }
 
     /// The same from the other side: ring 1 hanging alone, and hanging as the last of two and of three.
     @Test(arguments: ["011111111", "001111111", "000111111"])
     func aHandPutsRingOneOnAndTakesItBackOff(_ name: String) throws {
-        moveRingOneThereAndBack(from: try #require(PuzzleState(name)))
+        moveThereAndBack(ring: 1, from: try #require(PuzzleState(name)))
+    }
+
+    /// Ring 2 travels round rod 1, so a second hand first lifts ring 1 off the tip and holds it up, and puts
+    /// it back afterwards: with ring 3 on and off, with ring 2 starting off, and with rings off further along.
+    @Test(arguments: ["111111111", "110111111", "101111111", "100111111", "110101010"])
+    func twoHandsMoveRingTwoThereAndBack(_ name: String) throws {
+        moveThereAndBack(ring: 2, from: try #require(PuzzleState(name)))
     }
 
     /// Off the sword, ring 1 does not lie wedged in the slot: all of it is under the rails, and it hangs from
@@ -87,11 +95,14 @@ private func moveRingOneThereAndBack(from start: PuzzleState) {
 
     /// A hand says beforehand what it cannot do, and then does nothing.
     @Test func aHandDeclinesWhatItCannotDoYet() throws {
-        var toy = ToySimulation(pose: RestPoses.pose(for: .allOn))
-        let tookRingTwo = toy.move(ring: 2)
-        #expect(!tookRingTwo)
+        var toy = ToySimulation(pose: RestPoses.pose(for: try #require(PuzzleState("011111111"))))
+        let tookRingThree = toy.move(ring: 3)
+        #expect(!tookRingThree)
         #expect(!toy.handIsBusy)
         #expect(ToySimulation.aHandCanMove(ring: 1, in: .allOn))
+        #expect(ToySimulation.aHandCanMove(ring: 2, in: .allOn))
+        // Ring 2 with a chain of three rings off resting on the bar.
+        #expect(!ToySimulation.aHandCanMove(ring: 2, in: try #require(PuzzleState("110001111"))))
         // The bar hanging steeply from the one ring that is on.
         #expect(!ToySimulation.aHandCanMove(ring: 1, in: try #require(PuzzleState("100000000"))))
         // Ring 1 hanging as the last of a chain of four, down by the end of the bar.
@@ -120,6 +131,15 @@ private func moveRingOneThereAndBack(from start: PuzzleState) {
         arguments: (0..<PuzzleState.count).map { PuzzleState(bits: UInt16($0)) }.filter { ToySimulation.aHandCanMove(ring: 1, in: $0) }
     )
     func aHandMovesRingOneWhereverItSaysItCan(_ state: PuzzleState) {
-        moveRingOneThereAndBack(from: state)
+        moveThereAndBack(ring: 1, from: state)
+    }
+
+    /// The same for ring 2, with the second hand holding ring 1 up.
+    @Test(
+        .enabled(if: ProcessInfo.processInfo.environment["NINE_RINGS_FULL_SWEEP"] != nil),
+        arguments: (0..<PuzzleState.count).map { PuzzleState(bits: UInt16($0)) }.filter { ToySimulation.aHandCanMove(ring: 2, in: $0) }
+    )
+    func twoHandsMoveRingTwoWhereverTheySayTheyCan(_ state: PuzzleState) {
+        moveThereAndBack(ring: 2, from: state)
     }
 }

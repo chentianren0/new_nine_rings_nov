@@ -12,7 +12,7 @@ An Apple-native app, for iPhone, iPad and Mac, that shows how a Chinese nine lin
 - `NineRingsKit/`: a Swift package with everything that does not depend on the interface.
   - `Puzzle`: which rings are on, the rule that says which ring can move, and the one path through all 512 states.
   - `Toy`: the toy's dimensions, the pose of every part, and a settled pose for each state.
-  - `Simulation`: the toy in motion. Nine rings, nine rods and the bar are rigid bodies around the fixed sword, under gravity, that touch and rub but never pass through one another. A hand takes a ring off the sword and puts it back on, the way a person does it, by steering the ring with limited strength and waiting when it is held back; so far the hand moves ring 1, where the bar hangs within 45 degrees of level and the ring does not hang far down a chain.
+  - `Simulation`: the toy in motion. Nine rings, nine rods and the bar are rigid bodies around the fixed sword, under gravity, that touch and rub but never pass through one another. A hand takes a ring off the sword and puts it back on, the way a person does it, by steering the ring with limited strength and waiting when it is held back. For ring 2 a second hand first lifts ring 1 off the tip and holds it up, so that ring 2 travels round ring 1's rod. So far hands move rings 1 and 2, where the bar hangs within 45 degrees of level and no long chain of rings that are off is in the way; `ToySimulation.aHandCanMove(ring:in:)` says where.
 
 ## Building and testing
 
@@ -42,7 +42,7 @@ The app is built with pointer authentication. `NineRings.xcodeproj/project.xcwor
 
 ## Checks on GitHub
 
-A pull request that touches the package, the app or the project runs the package's tests and builds the app for the Mac and for iPhone and iPad (`.github/workflows/checks.yml`). One that touches the simulation or the toy's shapes also runs the long checks, which take many minutes (`.github/workflows/sweep.yml`): it simulates all 511 states with a ring on, for three seconds each, and has a hand move ring 1 there and back from every state where a hand can. Both workflows run on the Xcode the project is developed with, and both can be started by hand from the Actions tab.
+A pull request that touches the package, the app or the project runs the package's tests and builds the app for the Mac and for iPhone and iPad (`.github/workflows/checks.yml`). One that touches the simulation or the toy's shapes also runs the long checks, which take many minutes (`.github/workflows/sweep.yml`): it simulates all 511 states with a ring on, for three seconds each, and has hands move rings 1 and 2 there and back from every state where they can. Both workflows run on the Xcode the project is developed with, and both can be started by hand from the Actions tab.
 
 To run the long checks at home:
 
@@ -51,7 +51,7 @@ NINE_RINGS_FULL_SWEEP=1 swift test --package-path NineRingsKit -c release -Xswif
 ```
 
 ```bash
-NINE_RINGS_FULL_SWEEP=1 swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter aHandMovesRingOneWhereverItSaysItCan
+NINE_RINGS_FULL_SWEEP=1 swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter Wherever
 ```
 
 ## Seeing the app

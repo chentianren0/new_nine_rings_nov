@@ -84,3 +84,26 @@ func swordGoesThroughTheBar(in pose: ToyPose) -> Bool {
 /// The deepest overlap the tests accept after an ordinary run, and the limit the simulation never exceeds.
 let overlapLimit = 0.4
 let hardOverlapLimit = 0.5 + 1e-9
+
+
+/// Whether a ring is still round the rod of the ring before it, as every ring but the first always is.
+///
+/// The rod goes through the ring's opening somewhere between its bead and its eye. When the ring before is
+/// off, its eye often sits in this ring's lower arc, half through the opening: that counts as through, for
+/// the ring it holds cannot follow it.
+func ringIsRoundTheRodBefore(_ number: Int, in pose: ToyPose) -> Bool {
+    guard number > 1 else { return true }
+    let ring = pose.ring(number)
+    let rod = pose.rod(number - 1)
+    let normal = ring.worldDirection(SIMD3(0, 0, 1))
+    let eye = rod.position
+    let bead = rod.worldPoint(SIMD3(0, Dimensions.Rod.beadCenterY, 0))
+    let eyeSide = simd_dot(eye - ring.position, normal)
+    let beadSide = simd_dot(bead - ring.position, normal)
+    if abs(eyeSide) <= Dimensions.Rod.eyeRadius + Dimensions.Rod.wireRadius {
+        return simd_distance(eye - normal * eyeSide, ring.position) < Dimensions.Ring.radius
+    }
+    guard (eyeSide < 0) != (beadSide < 0) else { return false }
+    let crossing = eye + (bead - eye) * (eyeSide / (eyeSide - beadSide))
+    return simd_distance(crossing, ring.position) < Dimensions.Ring.radius
+}

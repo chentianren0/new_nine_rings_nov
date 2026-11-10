@@ -1,9 +1,9 @@
 name: Every state
 
 # The long checks. All 511 states with a ring on are simulated for three seconds each, to see that the toy
-# holds together in every one. And a hand moves ring 1 there and back from every state where a hand can, to
-# see that the ring arrives each time. They take many minutes, so they run only when the simulation or the
-# toy's shapes change, or when asked for by hand.
+# holds together in every one. And hands move rings 1 and 2 there and back from every state where they can,
+# to see that the ring arrives each time. They take many minutes, so they run only when the simulation or
+# the toy's shapes change, or when asked for by hand.
 
 on:
   pull_request:
@@ -39,13 +39,13 @@ jobs:
           NINE_RINGS_FULL_SWEEP: "1"
 
   hand:
-    name: A hand moves ring 1 wherever it can
+    name: Hands move rings wherever they can
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
-      - name: Move ring 1 there and back in every state
-        run: swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter aHandMovesRingOneWhereverItSaysItCan
+      - name: Move rings 1 and 2 there and back in every state where hands can
+        run: swift test --package-path NineRingsKit -c release -Xswiftc -enable-testing --filter Wherever
         env:
           NINE_RINGS_FULL_SWEEP: "1"
