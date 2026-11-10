@@ -6,8 +6,12 @@ import simd
 @testable import Simulation
 
 /// States that between them show every arrangement: all on, one ring off, chains of off rings of several
-/// lengths, ring 9 off, and the whole assembly hanging from a single ring at either end.
-private let variedStates = ["111111111", "101111111", "000111111", "011110010", "010101010", "000100000", "000000001", "100000000"]
+/// lengths, ring 9 off, the whole assembly hanging from a single ring at either end, an off ring whose eye
+/// stands up between the rails (001010000), and states where ring 1 sits at the tip under a heavy load.
+private let variedStates = [
+    "111111111", "101111111", "000111111", "011110010", "010101010", "000100000", "000000001", "100000000",
+    "001010000", "110100000", "101101000", "111001100", "101011010", "100011111",
+]
 
 private func simulate(_ state: PuzzleState, seconds: Double) -> ToySimulation {
     var toy = ToySimulation(pose: RestPoses.pose(for: state))

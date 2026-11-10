@@ -103,7 +103,9 @@ struct World: Sendable {
     var longestStep = 1.0 / 1200
     /// The farthest any point may travel on its own in one step.
     var freeReach = 0.2
-    /// The farthest the solver may move any point of a body in one step.
+    /// The farthest the solver may move any point of a body in a step of the longest kind. In a shorter step
+    /// it may move it proportionally less: what the solver does to a body becomes speed, and the same
+    /// correction made in a much shorter time would throw the body instead of placing it.
     var correctionReach = 0.15
     /// The deepest two surfaces may overlap at the end of a step. With the two reaches it must stay under the
     /// thinnest pair of parts, an eye on the bar, 1.35 mm together: 0.5 + 2 × (0.2 + 0.15) = 1.2.
@@ -166,6 +168,29 @@ struct World: Sendable {
 
     // MARK: Stepping
 
+    /// Eases overlapping parts apart without setting anything in motion.
+    ///
+    /// A pose made for slightly different shapes starts with small overlaps. Left to the first steps, they are
+    /// pushed out all at once and jolt the whole toy. This works them off beforehand, a little at a time.
+    mutating func relax(passes: Int = 200) {
+        for _ in 0..<passes {
+            for index in bodies.indices {
+                bodies[index].move(over: 0, reach: 0)
+            }
+            findContacts()
+            guard worstOverlap > settledOverlap else { break }
+            for _ in 0..<sweeps {
+                solve()
+            }
+            for index in bodies.indices {
+                bodies[index].limitCorrection(to: correctionReach)
+            }
+        }
+        halt()
+        findContacts()
+        lastOverlap = worstOverlap
+    }
+
     /// Advances the world by `time` seconds.
     mutating func advance(by time: Double) {
         var remaining = time
@@ -210,7 +235,7 @@ struct World: Sendable {
             sweep += 1
         } while sweep < sweeps || (sweep < mostSweeps && worstOverlap > settledOverlap)
         for index in bodies.indices {
-            bodies[index].limitCorrection(to: correctionReach)
+            bodies[index].limitCorrection(to: correctionReach * step / longestStep)
         }
 
         // An overlap left from before may stay as it is while it is being worked off, but never deepen.

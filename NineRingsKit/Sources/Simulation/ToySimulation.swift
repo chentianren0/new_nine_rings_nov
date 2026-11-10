@@ -45,6 +45,7 @@ public struct ToySimulation: Sendable {
         for piece in Self.swordPieces {
             world.addFixed(piece)
         }
+        world.relax()
     }
 
     /// Where every part is now.
