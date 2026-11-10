@@ -2,7 +2,8 @@ import Foundation
 import Toy
 import simd
 
-/// A hand moving one ring off the sword or back on, the way a person does it.
+/// A hand moving one ring off the sword or back on, the way a person does it, or holding one ring up out of
+/// the way of another.
 ///
 /// The hand does not place the ring. It steers the ring toward where it wants it, with limited strength, so the
 /// rest of the toy steers the ring too: a wire in the way turns the ring aside instead of being pushed through.
@@ -30,6 +31,10 @@ struct Hand: Sendable {
         case backOverTheTip
         /// Going on: slid along the rails to where it rests.
         case home(Station)
+        /// Out of the way: tipped up off the tip and raised until its rod stands well up through the slot.
+        case upOutOfTheWay
+        /// Out of the way: held up there, loosely, until the hand is told to let it down.
+        case heldUp
     }
 
     let ring: Int
@@ -38,6 +43,16 @@ struct Hand: Sendable {
     /// Where the hand last wanted the ring, and for how long it has now been waiting for the ring to follow.
     private var wanted: Station?
     private var waited = 0.0
+    /// Where the hand is holding its ring up out of the way, while it does.
+    private var holdingAt: Station?
+
+    /// Whether the hand has its ring up out of the way and is holding it there.
+    var isHoldingUp: Bool { holdingAt != nil }
+
+    /// Ends the hold: the hand goes on to put its ring back.
+    mutating func letDown() {
+        holdingAt = nil
+    }
 
     /// A hand that takes a ring off the sword: tips it flat over the tip end, tips it up off the tip, stands
     /// it along the slot and lowers it between the rails, leans it under them and lets it swing down to hang.
@@ -51,6 +66,12 @@ struct Hand: Sendable {
         Hand(ring: ring, legs: [.outFromUnder, .backOverTheTip, .home(station(of: resting.ring(ring)))])
     }
 
+    /// A hand that lifts a ring off the tip and holds it up, so that its rod stands up through the slot and
+    /// the next ring can travel round that rod; once told to, it puts the ring back where it lies in `resting`.
+    static func holdingUp(ring: Int, restingAs resting: ToyPose) -> Hand {
+        Hand(ring: ring, legs: [.ontoTheTip, .upOutOfTheWay, .heldUp, .backOverTheTip, .home(station(of: resting.ring(ring)))])
+    }
+
     private init(ring: Int, legs: [Leg]) {
         self.ring = ring
         self.legs = legs
@@ -59,6 +80,7 @@ struct Hand: Sendable {
     /// Moves the hand on by `time`, given where the toy's parts are now, and gives where it wants its ring,
     /// or `nil` once it has let go.
     mutating func advance(by time: Double, in pose: ToyPose) -> Station? {
+        if let holdingAt { return holdingAt }
         let ringNow = Self.station(of: pose.ring(ring))
 
         // How far the ring is behind sets the hand's pace: full while the ring keeps up, none while it is
@@ -82,7 +104,13 @@ struct Hand: Sendable {
                     return nil
                 }
                 let leg = legs.removeFirst()
-                stretch = Stretch(from: ringNow, through: Self.stations(of: leg, for: ring, in: pose), holdsAtItsEnd: legs.isEmpty)
+                let stations = Self.stations(of: leg, for: ring, in: pose)
+                if case .heldUp = leg {
+                    holdingAt = stations[0]
+                    wanted = nil
+                    return holdingAt
+                }
+                stretch = Stretch(from: ringNow, through: stations, holdsAtItsEnd: legs.isEmpty)
             }
             if let station = stretch?.advance(by: time * pace) {
                 wanted = station
@@ -127,14 +155,19 @@ extension Hand {
         func tipped(by angle: Double) -> Station {
             Station(centre: foot + radius * SIMD3(-cos(angle), sin(angle), 0), axis: SIMD3(sin(angle), cos(angle), 0))
         }
+        // Ring 1 is tipped up until it stands. Any later ring has the rod of the ring before it standing up
+        // through it, and a ring that stood upright there would have that rod in its own plane: it is tipped
+        // up less far, so that it leans toward the tip and the rod goes through its middle.
+        let upright = number == 1 ? Double.pi / 2 : 70 * Double.pi / 180
 
-        // Standing along the slot, a little toward the tip from that foot: there the ring's lowest point comes
-        // down in front of the next ring's lower arc and pushes that arc back, not forward. At the lower
-        // height its widest part is just under the rails.
+        // Standing along the slot, a little toward the tip from where its own eye is when it rests: there the
+        // ring's lowest point comes down in front of the next ring's lower arc and pushes that arc back, not
+        // forward. For ring 1 that is a little toward the tip from the foot; each later ring's place is one
+        // hole further along. At the lower height the ring's widest part is just under the rails.
         func standing(overX x: Double, atHeight height: Double) -> Station {
             Station(centre: SIMD3(x, height, 0), axis: along)
         }
-        let slotX = foot.x - 3.5
+        let slotX = foot.x - 3.5 + Dimensions.Bar.holePitch * Double(number - 1)
         let aboveHeight = Sword.railHeight + radius + 3.5
         let throughHeight = Sword.railHeight - 2.5
 
@@ -152,12 +185,13 @@ extension Hand {
         // eye that was caught nearer the tip than that is nudged back by the ring's own wire.
         let level = Station(centre: SIMD3(max(eye.x - reach, slotX - 5), eye.y, 0), axis: up)
         // A level ring is wider than the slot, so the side that tilts up has first to be brought inside its
-        // rail: the ring is slid aside by what that takes. The higher the eye was caught, the sooner the
-        // rising side meets the rail and the further aside the ring has to be.
+        // rail: the ring is slid aside by what that takes, and three millimetres more, for a ring follows
+        // its hand a millimetre or two behind. The higher the eye was caught, the sooner the rising side
+        // meets the rail and the further aside the ring has to be.
         let railUnderside = Sword.railHeight - Sword.wireRadius - Dimensions.Ring.wireRadius
         let slotHalfWidth = Sword.railOffset - Sword.wireRadius - Dimensions.Ring.wireRadius
         let rise = min(max((railUnderside - eye.y) / radius, 0), 1)
-        let aside = SIMD3(0, 0, -(max(0, radius * (1 - rise * rise).squareRoot() - slotHalfWidth) + 1.2))
+        let aside = SIMD3(0, 0, -(max(0, radius * (1 - rise * rise).squareRoot() - slotHalfWidth) + 3))
         let levelAside = Station(centre: level.centre + aside, axis: up)
         let leaning = Station(
             centre: level.centre + aside,
@@ -169,12 +203,20 @@ extension Hand {
             axis: SIMD3(cos(hangAngle), -sin(hangAngle), 0)
         )
 
+        // Held up out of the way: standing across the sword over the tip side of the slot, a ring's height
+        // and a little more above the rails, so that the next ring can stand and turn under it.
+        let parked = Station(centre: SIMD3(foot.x - 3, flatHeight + 3 * radius + 6, 0), axis: SIMD3(1, 0, 0))
+
         switch leg {
+        case .upOutOfTheWay:
+            return [tipped(by: upright / 2), tipped(by: upright), parked]
+        case .heldUp:
+            return [parked]
         case .ontoTheTip:
             return [flat]
         case .intoTheSlot:
             return [
-                tipped(by: .pi / 4), tipped(by: .pi / 2),
+                tipped(by: upright / 2), tipped(by: upright),
                 standing(overX: slotX, atHeight: aboveHeight), standing(overX: slotX, atHeight: throughHeight),
             ]
         case .underTheRails:
@@ -188,7 +230,7 @@ extension Hand {
             let x = level.centre.x + 5
             return [level, levelAside, leaning, standing(overX: x, atHeight: throughHeight), standing(overX: x, atHeight: aboveHeight)]
         case .backOverTheTip:
-            return [tipped(by: .pi / 2), tipped(by: .pi / 4), flat]
+            return [tipped(by: upright), tipped(by: upright / 2), flat]
         case .home(let resting):
             return [resting]
         }

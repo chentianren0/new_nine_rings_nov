@@ -151,6 +151,7 @@ private func speed(of toy: ToySimulation) -> Double {
             #expect(faults(in: toy.pose).isEmpty, "state \(state)")
             for number in PuzzleState.rings {
                 #expect(eyeHoldsItsRing(number, in: toy.pose), "state \(state), eye \(number)")
+                #expect(ringIsRoundTheRodBefore(number, in: toy.pose), "state \(state), ring \(number)")
             }
             #expect(!swordGoesThroughTheBar(in: toy.pose), "state \(state)")
             deepest = max(deepest, toy.deepestOverlap)
